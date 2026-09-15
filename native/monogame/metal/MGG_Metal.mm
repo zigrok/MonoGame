@@ -231,6 +231,9 @@ struct MGG_GraphicsDevice
     id<MTLCommandBuffer> commandBuffer = nil;
     id<CAMetalDrawable> drawable = nil;
     id<MTLRenderCommandEncoder> encoder = nil;
+    bool backbufferColorInitialized = false;
+    bool backbufferDepthInitialized = false;
+    bool backbufferStencilInitialized = false;
     uint64_t frame = 0;
     int begin_frame_index = 0;
 
@@ -575,6 +578,9 @@ static void MGMTL_CreateBackbufferAuxTargets(MGG_GraphicsDevice* device)
 {
     device->backbufferDepth = nil;
     device->backbufferMsaa = nil;
+    device->backbufferColorInitialized = false;
+    device->backbufferDepthInitialized = false;
+    device->backbufferStencilInitialized = false;
 
     const int w = device->backbufferWidth;
     const int h = device->backbufferHeight;
@@ -751,6 +757,9 @@ static void MGMTL_PrepareNextFrame(MGG_GraphicsDevice* device)
     device->commandBuffer = [device->queue commandBuffer];
     device->drawable = nil;
     device->encoder = nil;
+    device->backbufferColorInitialized = false;
+    device->backbufferDepthInitialized = false;
+    device->backbufferStencilInitialized = false;
 
     // Default target = backbuffer.
     device->usingBackbuffer = true;
@@ -814,7 +823,12 @@ static id<MTLTexture> MGMTL_AcquireBackbufferColor(MGG_GraphicsDevice* device, _
     // fullscreen/resize that happened since this frame began).
     MGMTL_SyncBackbufferSize(device);
     if (device->drawable == nil)
+    {
         device->drawable = [device->layer nextDrawable];
+        device->backbufferColorInitialized = false;
+        device->backbufferDepthInitialized = false;
+        device->backbufferStencilInitialized = false;
+    }
     if (device->drawable == nil)
         return nil;
 
@@ -857,16 +871,16 @@ static bool MGMTL_EnsureEncoder(MGG_GraphicsDevice* device)
 
         MTLRenderPassColorAttachmentDescriptor* ca = rp.colorAttachments[0];
         ca.texture = colorTex;
-        // A CAMetalDrawable has undefined contents when acquired, so loading it can expose stale
-        // swapchain memory before the first successful draw of a frame.
-        ca.loadAction = MTLLoadActionClear;
+        // Initialize a new drawable once; encoder breaks must preserve earlier draws.
+        ca.loadAction = device->clearColor || !device->backbufferColorInitialized
+            ? MTLLoadActionClear : MTLLoadActionLoad;
         ca.clearColor = device->clearColor
             ? device->clearColorValue
             : MTLClearColorMake(0.0, 0.0, 0.0, 1.0);
         if (resolveTex != nil)
         {
             ca.resolveTexture = resolveTex;
-            ca.storeAction = MTLStoreActionMultisampleResolve;
+            ca.storeAction = MTLStoreActionStoreAndMultisampleResolve;
         }
         else
         {
@@ -912,16 +926,18 @@ static bool MGMTL_EnsureEncoder(MGG_GraphicsDevice* device)
     {
         MTLRenderPassDepthAttachmentDescriptor* da = rp.depthAttachment;
         da.texture = depthTex;
-        da.loadAction = device->clearDepth ? MTLLoadActionClear : MTLLoadActionLoad;
-        da.clearDepth = device->clearDepthValue;
+        da.loadAction = device->clearDepth || (device->usingBackbuffer && !device->backbufferDepthInitialized)
+            ? MTLLoadActionClear : MTLLoadActionLoad;
+        da.clearDepth = device->clearDepth ? device->clearDepthValue : 1.0;
         da.storeAction = MTLStoreActionStore;
 
         if (hasStencil)
         {
             MTLRenderPassStencilAttachmentDescriptor* sa = rp.stencilAttachment;
             sa.texture = depthTex;
-            sa.loadAction = device->clearStencil ? MTLLoadActionClear : MTLLoadActionLoad;
-            sa.clearStencil = device->clearStencilValue;
+            sa.loadAction = device->clearStencil || (device->usingBackbuffer && !device->backbufferStencilInitialized)
+                ? MTLLoadActionClear : MTLLoadActionLoad;
+            sa.clearStencil = device->clearStencil ? device->clearStencilValue : 0;
             sa.storeAction = MTLStoreActionStore;
         }
     }
@@ -930,6 +946,14 @@ static bool MGMTL_EnsureEncoder(MGG_GraphicsDevice* device)
         rp.visibilityResultBuffer = device->visibilityBuffer;
 
     device->encoder = [device->commandBuffer renderCommandEncoderWithDescriptor:rp];
+    if (device->encoder == nil)
+        return false;
+    if (device->usingBackbuffer)
+    {
+        device->backbufferColorInitialized = true;
+        device->backbufferDepthInitialized = depthTex != nil;
+        device->backbufferStencilInitialized = depthTex != nil && hasStencil;
+    }
     [device->encoder setFrontFacingWinding:MTLWindingClockwise];
 
     // Consume pending clears; everything must be re-applied to the fresh encoder.
@@ -960,7 +984,7 @@ static void MGMTL_FlushAndContinue(MGG_GraphicsDevice* device)
         [device->commandBuffer waitUntilCompleted];
     }
     device->commandBuffer = [device->queue commandBuffer];
-    device->drawable = nil;
+    // A readback flush is not a presentation; subsequent draws still target this drawable.
     MGMTL_MarkAllDirty(device);
 }
 
@@ -1096,7 +1120,7 @@ void MGG_GraphicsDevice_GetBackBufferData(MGG_GraphicsDevice* device, mgint x, m
                                           void* data, mgint count, mgint dataBytes)
 {
     // Ensure the backbuffer has actually been drawn before reading it back.
-    if (device->drawable == nil)
+    if (device->drawable == nil || device->clearColor || device->clearDepth || device->clearStencil)
     {
         if (!MGMTL_EnsureEncoder(device))
             return;
@@ -1122,7 +1146,7 @@ void MGG_GraphicsDevice_GetBackBufferData(MGG_GraphicsDevice* device, mgint x, m
     const uint8_t* srcPtr = (const uint8_t*)staging.contents;
     uint8_t* dstPtr = (uint8_t*)data;
     size_t pixels = (size_t)width * height;
-    size_t maxPixels = (size_t)dataBytes / bpp;
+    size_t maxPixels = (size_t)count * dataBytes / bpp;
     if (pixels > maxPixels) pixels = maxPixels;
     for (size_t i = 0; i < pixels; i++)
     {

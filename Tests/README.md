@@ -30,6 +30,26 @@ dotnet test Tests/MonoGame.Tests.DesktopGL.csproj --filter MonoGame.Tests.Visual
 
 ## Rendering Tests
 
+### Desktop Metal backbuffer preservation
+
+On macOS, rebuild the native runtime and run the existing NUnitLite runner on its
+main UI thread (no offscreen frame-capture substitute):
+
+```sh
+make -C native/monogame -f desktopmetal.make config=release -j4
+dotnet build Tests/MonoGame.Tests.DesktopMetal.csproj -c Release
+cd Tests
+MTL_DEBUG_LAYER=1 dotnet ../Artifacts/Tests/DesktopMetal/Release/MonoGame.Tests.dll \
+  --where='test =~ MetalBackbuffer_ResumedPassesPreservePixels' --workers=0 \
+  --result=../Artifacts/Tests/DesktopMetal/metal-backbuffer-results.xml
+```
+
+These GPU-readback regressions cover single-sample and 4x MSAA drawables over two
+presented frames: deterministic first initialization, resumed passes, readback
+flushes, render-target switches, explicit color/depth/stencil clears and retained
+depth/stencil tests. Backbuffer MSAA passes must both store samples and resolve;
+resolving alone cannot preserve samples for a subsequent load.
+
 Most rendering tests do not require a game loop, but just need a GraphicsDevice to be able to render things. These tests can inherit from GraphicsDeviceTestFixtureBase and use the supplied GraphicsDevice 'gd' to render. Tests that require rendering were formerly implemented with the VisualTestFixtureBase (we call these "visual tests"), but this is no longer recommended unless the test requires an actual Game loop or tests functionality of the Game class itself because these tests are slower and harder to implement. When creating a new rendering test, the first run will fail because there is no reference image. Running the test will capture and save the result. Run the test with the XNA test project to get a reference image that checks XNA compatibility, or with MG to make sure no regression occurs. After adding the captured frame as a reference image, the test should pass.
 
 ### GraphicsDeviceTestFixtureBase
