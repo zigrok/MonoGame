@@ -34,6 +34,15 @@ internal partial class GraphicsCapabilities
         SupportsSeparateBlendStates = true;
 
         MaxTextureAnisotropy = (device.GraphicsProfile == GraphicsProfile.Reach) ? 2 : 16;
+#if BROWSER
+        SupportsNonPowerOfTwo = true;
+        SupportsTextureFilterAnisotropic = false;
+        SupportsDxt1 = SupportsS3tc = false;
+        SupportsTextureArrays = SupportsDepthClamp = false;
+        SupportsFloatTextures = SupportsHalfFloatTextures = SupportsNormalized = false;
+        SupportsBaseIndexInstancing = SupportsSeparateBlendStates = false;
+        MaxTextureAnisotropy = 1;
+#endif
     }
 
 }

@@ -7,6 +7,8 @@
 
 #if defined(MG_DIRECTX12)
 #define MG_BUILTIN_EFFECT_SYMBOL(name) name##_dx12_mgfxo
+#elif defined(MG_GLES)
+#define MG_BUILTIN_EFFECT_SYMBOL(name) name##_gl_mgfxo
 #elif defined(MG_VULKAN) || defined(MG_METAL)
 // The Metal backend reuses the Vulkan-compiled effect blobs (SPIR-V + reflection header) and
 // translates SPIR-V -> MSL at runtime, so it consumes the same *_vk_mgfxo symbols.

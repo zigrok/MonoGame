@@ -540,6 +540,7 @@ enum class MGGraphicsBackend : mgint
     Vulkan = 2,
     Metal = 3,
     DirectX12 = 4,
+    WebGL = 5,
 };
 
 enum class MGSystemCursor : mgint
@@ -571,4 +572,3 @@ enum class MGGamePadType : mgint
     DrumKit = 8,
     BigButtonPad = 768,
 };
-

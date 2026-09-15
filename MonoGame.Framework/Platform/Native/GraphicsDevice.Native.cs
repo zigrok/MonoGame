@@ -70,7 +70,11 @@ public partial class GraphicsDevice
 
     internal int PlatformGetMaxMultiSampleCount(SurfaceFormat format)
     {
+#if BROWSER
+        return 0;
+#else
         return 4;
+#endif
     }
 
     private unsafe void OnPresentationChanged()

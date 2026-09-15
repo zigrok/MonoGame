@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <MonoGameBrowserNativeRoot>$(MSBuildThisFileDirectory)../../Artifacts/browser/native</MonoGameBrowserNativeRoot>
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <PublishTrimmed>false</PublishTrimmed>
+    <WasmBuildNative>true</WasmBuildNative>
+    <EmccExtraLDFlags>$(EmccExtraLDFlags) -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2</EmccExtraLDFlags>
+  </PropertyGroup>
+  <ItemGroup>
+    <NativeFileReference Include="$(MonoGameBrowserNativeRoot)/mgruntime.a" />
+    <NativeFileReference Include="$(MonoGameBrowserNativeRoot)/sdl3/libSDL3.a" />
+    <NativeFileReference Include="$(MonoGameBrowserNativeRoot)/faudio/libFAudio.a" />
+  </ItemGroup>
+  <Target Name="CheckMonoGameBrowserNative" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MonoGameBrowserNativeRoot)/mgruntime.a')"
+           Text="Build native MonoGame browser libraries first: bash MonoGame/native/browser/build.sh" />
+    <Error Condition="'$(RuntimeIdentifier)' != 'browser-wasm'"
+           Text="MonoGame.Browser.Native.targets requires RuntimeIdentifier=browser-wasm." />
+  </Target>
+</Project>

@@ -21,6 +21,10 @@ namespace MonoGame.Effect
         {
         }
 
+        protected VulkanShaderProfile(string name, byte formatId) : base(name, formatId) { }
+        protected virtual bool UseGlLayout => false;
+        protected virtual byte[] PrepareBytecode(byte[] bytecode, string outputPath) => bytecode;
+
         internal override void AddMacros(Dictionary<string, string> macros)
         {
             macros.Add("SM6", "1");
@@ -158,7 +162,7 @@ namespace MonoGame.Effect
                 toolArgs = "";
                 toolArgs += "-nologo ";
                 toolArgs += "-spirv ";
-                toolArgs += "-fvk-use-dx-layout ";
+                toolArgs += UseGlLayout ? "-fvk-use-gl-layout " : "-fvk-use-dx-layout ";
 
                 // Adds HLSL specific reflection information to the SPIR-V
                 // https://github.com/Microsoft/DirectXShaderCompiler/blob/main/docs/SPIR-V.rst#reflection
@@ -512,7 +516,7 @@ namespace MonoGame.Effect
 
                                 // TODO: These are unused at runtime under the
                                 // new native backends, we will remove them soon.
-                                location = 0,
+                                location = UseGlLayout ? checked((int)(input.Location ?? throw new InvalidOperationException("BrowserGL vertex input requires a location.")) + locationIndex) : 0,
                                 name = string.Empty,
                             };
 
@@ -607,7 +611,7 @@ namespace MonoGame.Effect
                     }
 
                     // Finally write the shader bytecode.
-                    writer.Write(shaderData.Bytecode);
+                    writer.Write(PrepareBytecode(shaderData.Bytecode, outputPath));
 
                     // Store the combined binding layout info and shader code.
                     shaderData.ShaderCode = stream.ToArray();

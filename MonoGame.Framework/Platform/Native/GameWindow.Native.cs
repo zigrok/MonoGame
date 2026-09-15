@@ -34,10 +34,14 @@ internal class NativeGameWindow : GameWindow
     {
         get
         {
+#if BROWSER
+            return 1f;
+#else
             if (_handle == null || _width <= 0)
                 return 1f;
             MGP.Window_GetDrawableSize(_handle, out var drawableWidth, out var drawableHeight);
             return drawableWidth > 0 ? (float)drawableWidth / _width : 1f;
+#endif
         }
     }
 
@@ -213,7 +217,9 @@ internal class NativeGameWindow : GameWindow
         _width = width;
         _height = height;
 
+#if !BROWSER
         MGP.Window_SetClientSize(_handle, width, height);
+#endif
 
         OnClientSizeChanged();
     }

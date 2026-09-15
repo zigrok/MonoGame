@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DefineConstants>XNADESIGNPROVIDED;NATIVE;BROWSER;NETSTANDARD;STBSHARP_INTERNAL</DefineConstants>
+    <Description>MonoGame SDL3 native WebGL2 browser platform.</Description>
+    <PackageId>MonoGame.Framework.Browser</PackageId>
+    <IsAotCompatible>false</IsAotCompatible>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Configurations>Debug;Release</Configurations>
+    <Platforms>AnyCPU</Platforms>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="bin/**/*;obj/**/*;Platform/**/*;Properties/**/*;Utilities/System.Numerics.Vectors/**/*;Devices/**/*" />
+    <Compile Include="Platform/Native/**/*.cs" />
+    <Compile Include="Platform/Browser/**/*.cs" />
+    <Compile Include="Platform/Utilities/ReflectionHelpers.Default.cs" />
+    <Compile Include="Platform/Input/InputKeyEventArgs.cs" />
+    <Compile Include="Platform/Utilities/AssemblyHelper.cs" />
+    <Compile Include="Platform/Threading.cs" />
+    <Compile Include="Platform/Desktop/Devices/Sensors/Accelerometer.cs" />
+    <Compile Include="Platform/Desktop/Devices/Sensors/Compass.cs" />
+  </ItemGroup>
+  <Import Project="MonoGame.Framework.Devices.Sensors.targets" />
+</Project>

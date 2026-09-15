@@ -243,7 +243,11 @@ MGP_Platform* MGP_Platform_Create(MGGameRunBehavior& behavior)
 	SDL_SetHint("SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS", "0");
 	SDL_SetHint("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
 
+#if defined(MG_GLES)
+    behavior = MGGameRunBehavior::Asynchronous;
+#else
 	behavior = MGGameRunBehavior::Synchronous;
+#endif
 
 	auto platform = new MGP_Platform();
 	return platform;
@@ -294,9 +298,20 @@ void MGP_Platform_BeforeInitialize(MGP_Platform* platform)
 	assert(platform != nullptr);
 }
 
+#if defined(MG_GLES)
+void MGP_Platform_StartRunLoop(MGP_Platform* platform)
+{
+    // The host owns requestAnimationFrame; starting the platform only reveals its canvas.
+    for (auto window : platform->windows)
+        SDL_ShowWindow(window->window);
+}
+#endif
+
 MGMonoGamePlatform MGP_Platform_GetPlatform()
 {
-#if MG_VULKAN
+#if MG_GLES
+    return MGMonoGamePlatform::DesktopVK;
+#elif MG_VULKAN
     return MGMonoGamePlatform::DesktopVK;
 #elif MG_DIRECTX12
     return MGMonoGamePlatform::WindowsDX12;
@@ -313,7 +328,9 @@ MGMonoGamePlatform MGP_Platform_GetPlatform()
 
 MGGraphicsBackend MGP_Platform_GetGraphicsBackend()
 {
-#if MG_VULKAN
+#if MG_GLES
+    return MGGraphicsBackend::WebGL;
+#elif MG_VULKAN
     return MGGraphicsBackend::Vulkan;
 #elif MG_DIRECTX12
     return MGGraphicsBackend::DirectX12;
@@ -836,6 +853,13 @@ MGP_Window* MGP_Window_Create(
     // DirectX 12 only needs the HWND exposed by SDL; no SDL graphics flag is required.
 #elif defined(MG_METAL)
 	flags |= SDL_WINDOW_METAL;
+#elif defined(MG_GLES)
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+    flags |= SDL_WINDOW_OPENGL;
 #else
 	#error Not implemented
 #endif
@@ -1316,4 +1340,3 @@ mgbyte MGP_GamePad_SetVibration(MGP_Platform* platform, mgint identifer, mgfloat
     auto supported = SDL_GameControllerRumble(pair->second, (mgushort)(leftMotor * 0xFFFF), (mgushort)(rightMotor * 0xFFFF), INT_MAX);
     return supported == 0;
 }
-

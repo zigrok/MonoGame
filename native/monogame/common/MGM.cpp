@@ -18,7 +18,9 @@ struct MGG_Texture;
 #include "minivorbis.h"
 
 #define MINIMP3_ONLY_MP3
+#if !defined(__EMSCRIPTEN__)
 #define MINIMP3_ONLY_SIMD
+#endif
 #define MINIMP3_IMPLEMENTATION
 #include "minimp3_ex.h"
 
@@ -72,6 +74,12 @@ void MGM_AudioDecoder_Ogg::Initialize(const char* filepath, MGM_AudioDecoderInfo
 	_vreader = new OggVorbis_File();
 
 	int err = ov_fopen(filepath, _vreader);
+    if (err != 0)
+    {
+        delete _vreader;
+        _vreader = nullptr;
+        return;
+    }
 
 	vorbis_info* vinfo = ov_info(_vreader, -1);
 	ogg_int64_t samples = ov_pcm_total(_vreader, -1);
@@ -255,9 +263,14 @@ MGM_AudioDecoder* MGM_AudioDecoder_TryCreate_Mp3(const uint8_t* signature)
 	return new MGM_AudioDecoder_Mp3();
 }
 
+#if defined(__EMSCRIPTEN__)
+MGM_AudioDecoder* MGM_AudioDecoder_TryCreate_Wav(const uint8_t* signature);
+#endif
+
 MGM_AudioDecoder* MGM_AudioDecoder_Create(const char* filepath, MGM_AudioDecoderInfo& info)
 {
 	assert(filepath != nullptr);
+    info = {};
 
 	uint8_t signature[16];
 	MGM_ReadSignature(filepath, signature);
@@ -266,6 +279,9 @@ MGM_AudioDecoder* MGM_AudioDecoder_Create(const char* filepath, MGM_AudioDecoder
 	MGM_AudioDecoder* decoder = nullptr;
 	decoder = decoder ? decoder : MGM_AudioDecoder_TryCreate_Ogg(signature);
 	decoder = decoder ? decoder : MGM_AudioDecoder_TryCreate_Mp3(signature);
+#if defined(__EMSCRIPTEN__)
+    decoder = decoder ? decoder : MGM_AudioDecoder_TryCreate_Wav(signature);
+#endif
 
 	if (decoder == nullptr)
 	{
@@ -276,6 +292,11 @@ MGM_AudioDecoder* MGM_AudioDecoder_Create(const char* filepath, MGM_AudioDecoder
 	}
 
 	decoder->Initialize(filepath, info);
+    if (info.samplerate <= 0 || info.channels <= 0)
+    {
+        delete decoder;
+        return nullptr;
+    }
 	return decoder;
 }
 
@@ -375,4 +396,3 @@ MGG_Texture* MGM_VideoDecoder_Decode(MGM_VideoDecoder* decoder)
 	assert(decoder != nullptr);
 	return decoder->Decode();
 }
-

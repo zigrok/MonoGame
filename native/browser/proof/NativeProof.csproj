@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <OutputType>Exe</OutputType>
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <PublishTrimmed>false</PublishTrimmed>
+    <WasmBuildNative>true</WasmBuildNative>
+    <WasmNativeStrip>false</WasmNativeStrip>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <WasmMainJSPath>main.js</WasmMainJSPath>
+    <EmccExtraLDFlags>-sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2</EmccExtraLDFlags>
+  </PropertyGroup>
+  <ItemGroup>
+    <NativeFileReference Include="../../../Artifacts/browser/libbrowserproof.a" />
+    <NativeFileReference Include="../../../Artifacts/browser/sdl3/libSDL3.a" />
+    <Content Include="index.html" Link="wwwroot/index.html" CopyToPublishDirectory="Always" />
+    <Content Include="main.js" Link="wwwroot/main.js" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+</Project>

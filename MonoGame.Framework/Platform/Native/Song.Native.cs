@@ -17,11 +17,47 @@ public sealed partial class Song : IEquatable<Song>, IDisposable
 
     private MGM_AudioDecoderInfo _info;
 
+#if BROWSER
+    private static readonly System.Collections.Generic.List<Song> BrowserSongs = new();
+    private bool _browserStarted, _browserFinished, _browserPaused;
+
+    internal static unsafe void PumpBrowserAudio()
+    {
+        foreach (var song in BrowserSongs.ToArray())
+        {
+            if (song._browserPaused)
+                continue;
+            var queued = MGA.Voice_GetBufferCount(song._voice);
+            if (song._browserFinished)
+            {
+                if (queued == 0)
+                {
+                    BrowserSongs.Remove(song);
+                    song.DonePlaying?.Invoke(song, EventArgs.Empty);
+                }
+                continue;
+            }
+            if (queued >= 3)
+                continue;
+            song._browserFinished = MGM.AudioDecoder_Decode(song._decoder, out var buffer, out var size) != 0;
+            if (size == 0)
+                continue;
+            MGA.Voice_AppendBuffer(song._voice, buffer, size);
+            if (!song._browserStarted)
+            {
+                MGA.Voice_Play(song._voice, 0);
+                song._browserStarted = true;
+            }
+        }
+    }
+#else
     private readonly ManualResetEvent _stop = new ManualResetEvent(false);
     private Thread _thread;
+#endif
 
     private float _volume = 1.0f;
 
+#if !BROWSER
     private unsafe void DecoderStream()
     {
         bool start_voice = true;
@@ -67,6 +103,7 @@ public sealed partial class Song : IEquatable<Song>, IDisposable
 
         // We're done streaming.
     }
+#endif
 
     #region The playback API used by MediaPlayer
 
@@ -75,7 +112,11 @@ public sealed partial class Song : IEquatable<Song>, IDisposable
         _decoder = MGM.AudioDecoder_Create(filePath, out _info);
 
         if (_decoder == null)
+#if BROWSER
+            throw new InvalidOperationException("Cannot decode browser song. Stage a valid PCM16 WAV, Ogg Vorbis or MP3 file before creating Song.");
+#else
             return;
+#endif
 
         SoundEffect.Initialize();
 
@@ -130,7 +171,8 @@ public sealed partial class Song : IEquatable<Song>, IDisposable
                 return TimeSpan.Zero;
 
             var milliseconds = MGA.Voice_GetPosition(_voice);
-            milliseconds %= (ulong)_duration.TotalMilliseconds;
+            if (_duration.TotalMilliseconds > 0)
+                milliseconds %= (ulong)_duration.TotalMilliseconds;
 
             return TimeSpan.FromMilliseconds(milliseconds);
         }
@@ -155,12 +197,17 @@ public sealed partial class Song : IEquatable<Song>, IDisposable
         // Move the decoder to the new position.
         MGM.AudioDecoder_SetPosition(_decoder, milliseconds);
 
+#if BROWSER
+        _browserStarted = _browserFinished = _browserPaused = false;
+        BrowserSongs.Add(this);
+#else
         // The thread does the rest of the work.
         _stop.Reset();
         _thread = new Thread(DecoderStream);
         _thread.Name = "MGSongDecoder";
         _thread.Priority = ThreadPriority.BelowNormal;
         _thread.Start();
+#endif
 
         _playCount++;
     }
@@ -171,6 +218,9 @@ public sealed partial class Song : IEquatable<Song>, IDisposable
             return;
 
         // The thread will stop processing on its own.
+#if BROWSER
+        _browserPaused = true;
+#endif
         MGA.Voice_Pause(_voice);
     }
 
@@ -179,11 +229,17 @@ public sealed partial class Song : IEquatable<Song>, IDisposable
         if (_voice == null)
             return;
 
+#if BROWSER
+        _browserPaused = false;
+#endif
         MGA.Voice_Resume(_voice);
     }
 
     internal unsafe void Stop(bool immediate = false)
     {
+#if BROWSER
+        BrowserSongs.Remove(this);
+#else
         if (_thread != null)
         {
             // Halt the thread.
@@ -191,6 +247,7 @@ public sealed partial class Song : IEquatable<Song>, IDisposable
             _thread.Join();
             _thread = null;
         }
+#endif
 
         if (_voice != null)
             MGA.Voice_Stop(_voice, (byte)(immediate ? 1 : 0));

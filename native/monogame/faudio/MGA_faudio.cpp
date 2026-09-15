@@ -53,6 +53,20 @@ struct MGA_Buffer
 	mgulong duration = 0;
 };
 
+#ifdef __EMSCRIPTEN__
+static bool browserAudioSuspended = false;
+MG_EXPORT void MGA_Browser_SetAudioSuspended(MGA_System* system, mgbool suspended)
+{
+	browserAudioSuspended = suspended;
+	if (!system)
+		return;
+	if (suspended)
+		FAudio_StopEngine(system->faudio);
+	else
+		FAudio_StartEngine(system->faudio);
+}
+#endif
+
 struct MGA_Voice
 {
 	MGA_System* system = nullptr;
@@ -186,6 +200,10 @@ MGA_System* MGA_System_Create()
 	// Used to track streaming buffers.
 	system->callbacks = new MGA_VoiceCallbacks(system);
 
+#ifdef __EMSCRIPTEN__
+	if (browserAudioSuspended)
+		FAudio_StopEngine(system->faudio);
+#endif
 	return system;
 }
 
@@ -967,4 +985,3 @@ void MGA_Voice_Apply3D(MGA_Voice* voice, Listener& listener, Emitter& emitter, m
 	);
 	FAudioSourceVoice_SetFrequencyRatio(voice->voice, dsp.DopplerFactor, FAUDIO_COMMIT_NOW);
 }
-

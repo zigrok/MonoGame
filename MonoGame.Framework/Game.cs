@@ -535,12 +535,14 @@ namespace Microsoft.Xna.Framework
             // any change fully in both the fixed and variable timestep 
             // modes across multiple devices and platforms.
 
+#if !BROWSER
         RetryTick:
 
             if (!IsActive && (InactiveSleepTime.TotalMilliseconds >= 1.0))
             {
                 System.Threading.Thread.Sleep((int)InactiveSleepTime.TotalMilliseconds);
             }
+#endif
 
             // Advance the accumulated elapsed time.
             if (_gameTimer == null)
@@ -554,6 +556,9 @@ namespace Microsoft.Xna.Framework
 
             if (IsFixedTimeStep && _accumulatedElapsedTime < TargetElapsedTime)
             {
+#if BROWSER
+                return;
+#else
                 // Sleep for as long as possible without overshooting the update time
                 var sleepTime = (TargetElapsedTime - _accumulatedElapsedTime).TotalMilliseconds;
                 // We only have a precision timer on Windows, so other platforms may still overshoot
@@ -565,6 +570,7 @@ namespace Microsoft.Xna.Framework
 #endif
                 // Keep looping until it's time to perform the next update
                 goto RetryTick;
+#endif
             }
 
             // Do not allow any update to take longer than our maximum.

@@ -76,6 +76,9 @@ class NativeGamePlatform : GamePlatform
 
     public override unsafe void RunLoop()
     {
+#if BROWSER
+        throw new PlatformNotSupportedException("Browser games must run asynchronously using BrowserGameLoop.Tick from requestAnimationFrame.");
+#else
         _window.Show(true);
         _window.Raise();
 
@@ -92,7 +95,35 @@ class NativeGamePlatform : GamePlatform
             else
                 _isExiting = 0;
         }
+#endif
     }
+
+#if BROWSER
+    private bool _browserRunning;
+
+    internal bool TickBrowserFrame()
+    {
+        if (!_browserRunning)
+            return false;
+        if (MonoGame.Framework.BrowserGameLoop.IsContextLost())
+        {
+            _browserRunning = false;
+            throw new InvalidOperationException("The WebGL2 context was lost. Restart the page to recreate the native graphics resources.");
+        }
+        PollEvents();
+        if (_isExiting > 0 && ShouldExit())
+        {
+            _browserRunning = false;
+            RaiseAsyncRunLoopEnded();
+            return false;
+        }
+        _isExiting = 0;
+        Microsoft.Xna.Framework.Media.Song.PumpBrowserAudio();
+        Game.Tick();
+        Threading.Run();
+        return true;
+    }
+#endif
 
     private unsafe void PollEvents()
     {
@@ -111,6 +142,9 @@ class NativeGamePlatform : GamePlatform
 
                 case EventType.WindowLostFocus:
                     IsActive = false;
+#if BROWSER
+                    Keyboard.Keys.Clear();
+#endif
                     break;
 
                 case EventType.WindowResized:
@@ -287,7 +321,12 @@ class NativeGamePlatform : GamePlatform
 
     public override unsafe void StartRunLoop()
     {
+#if BROWSER
         MGP.Platform_StartRunLoop(Handle);
+        _browserRunning = true;
+#else
+        MGP.Platform_StartRunLoop(Handle);
+#endif
     }
 
     public override unsafe void BeforeInitialize()

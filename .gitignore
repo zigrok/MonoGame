@@ -99,6 +99,8 @@ _*
 # Premake generated files
 /native/**/*.sln
 /native/**/*.csproj
+!/native/browser/proof/NativeProof.csproj
+!/native/browser/renderer-proof/RendererProof.csproj
 /native/**/*.vcxproj
 /native/**/*.vcxproj.filters
 /native/**/*.make

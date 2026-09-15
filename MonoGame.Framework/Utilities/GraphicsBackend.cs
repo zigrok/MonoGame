@@ -32,6 +32,11 @@ namespace MonoGame.Framework.Utilities
         /// <summary>
         /// Represents the Microsoft DirectX 12 graphics backend.
         /// </summary>
-        DirectX12
+        DirectX12,
+
+        /// <summary>
+        /// Represents the native browser WebGL2 backend using BrowserGL effect bytecode.
+        /// </summary>
+        WebGL = 5
     }
 }

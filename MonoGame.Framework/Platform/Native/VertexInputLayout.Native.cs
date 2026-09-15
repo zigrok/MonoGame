@@ -48,6 +48,9 @@ partial class VertexInputLayout
                     {
                         found = true;
                         elements[i] = vertexElement.AsInputElement(j, instanceFrequencies);
+#if BROWSER
+                        elements[i].SemanticIndex = (uint)attr.location;
+#endif
                         strides[j] = declaration.VertexStride;
                         break;
                     }

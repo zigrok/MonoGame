@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>browser-wasm</RuntimeIdentifier>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EmccExtraLDFlags>-sGL_ASSERTIONS=1</EmccExtraLDFlags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../MonoGame.Framework/MonoGame.Framework.Browser.csproj" />
+    <Content Include="index.html" Link="wwwroot/index.html" CopyToPublishDirectory="Always" />
+    <Content Include="main.js" Link="wwwroot/main.js" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+  <Import Project="../MonoGame.Browser.Native.targets" />
+</Project>
