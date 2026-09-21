@@ -35,6 +35,8 @@ internal enum EventType : uint
 
     DropFile,
     DropComplete,
+    TextEditing,
+    TextCommit,
 }
 
 
@@ -234,6 +236,26 @@ internal static unsafe partial class MGP
 
     [DllImport(MonoGameNativeDLL, EntryPoint = "MGP_Platform_PollEvent", ExactSpelling = true)]
     public static extern byte Platform_PollEvent(MGP_Platform* platform, out MGP_Event event_);
+
+#if !BROWSER
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    internal delegate void LiveResizeCallback(nint window, int width, int height);
+
+    [DllImport(MonoGameNativeDLL, EntryPoint = "MGP_Platform_SetLiveResizeCallback", ExactSpelling = true, CallingConvention = CallingConvention.Cdecl)]
+    public static extern byte Platform_SetLiveResizeCallback(MGP_Platform* platform, nint callback);
+
+    [DllImport(MonoGameNativeDLL, EntryPoint = "MGP_Platform_GetTextEvent", ExactSpelling = true)]
+    public static extern nint Platform_GetTextEvent(MGP_Platform* platform);
+
+    [DllImport(MonoGameNativeDLL, EntryPoint = "MGP_Window_SupportsTextComposition", ExactSpelling = true)]
+    public static extern byte Window_SupportsTextComposition(MGP_Window* window);
+
+    [DllImport(MonoGameNativeDLL, EntryPoint = "MGP_Window_SetTextInputActive", ExactSpelling = true)]
+    public static extern byte Window_SetTextInputActive(MGP_Window* window, byte active);
+
+    [DllImport(MonoGameNativeDLL, EntryPoint = "MGP_Window_SetTextInputRectangle", ExactSpelling = true)]
+    public static extern byte Window_SetTextInputRectangle(MGP_Window* window, int x, int y, int width, int height);
+#endif
 
     [DllImport(MonoGameNativeDLL, EntryPoint = "MGP_Platform_StartRunLoop", ExactSpelling = true)]
     public static extern void Platform_StartRunLoop(MGP_Platform* platform);

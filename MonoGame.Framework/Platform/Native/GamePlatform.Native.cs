@@ -19,6 +19,8 @@ partial class GamePlatform
 
 class NativeGamePlatform : GamePlatform
 {
+    private static readonly bool IsMacOS = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+
     internal unsafe MGP_Platform* Handle;
 
     private static unsafe MGG_GraphicsSystem* _system;
@@ -28,6 +30,12 @@ class NativeGamePlatform : GamePlatform
     private readonly List<string> _dropList = new List<string>(64);
 
     private int _isExiting;
+
+#if !BROWSER
+    private MGP.LiveResizeCallback _liveResizeCallback;
+    private LiveResizeFrameDispatcher _liveResizeFrames;
+    private bool? _deferredDispose;
+#endif
 
     public unsafe NativeGamePlatform(Game game) : base(game)
     {
@@ -82,21 +90,90 @@ class NativeGamePlatform : GamePlatform
         _window.Show(true);
         _window.Raise();
 
-        while (true)
+        StartLiveResize();
+        try
         {
-            PollEvents();
+            while (true)
+            {
+                if (_liveResizeFrames != null)
+                    _liveResizeFrames.IsPolling = true;
+                try
+                {
+                    PollEvents();
+                }
+                finally
+                {
+                    if (_liveResizeFrames != null)
+                        _liveResizeFrames.IsPolling = false;
+                    if (_deferredDispose.HasValue)
+                    {
+                        var disposing = _deferredDispose.Value;
+                        _deferredDispose = null;
+                        Dispose(disposing);
+                    }
+                }
 
-            Game.Tick();
+                _liveResizeFrames?.ThrowIfFaulted();
+                if (_window == null || (_isExiting > 0 && ShouldExit()))
+                    break;
 
-            Threading.Run();
+                Game.Tick();
 
-            if (_isExiting > 0 && ShouldExit())
-                break;
-            else
-                _isExiting = 0;
+                Threading.Run();
+
+                if (_isExiting > 0 && ShouldExit())
+                    break;
+                else
+                    _isExiting = 0;
+            }
+        }
+        finally
+        {
+            StopLiveResize();
         }
 #endif
     }
+
+#if !BROWSER
+    private unsafe void StartLiveResize()
+    {
+        if (!IsMacOS)
+            return;
+
+        _liveResizeFrames = new LiveResizeFrameDispatcher();
+        _liveResizeCallback = (handle, width, height) => _liveResizeFrames.TryRun(() =>
+        {
+            if (_isExiting > 0 || _window == null || handle != (nint)_window._handle)
+                return;
+
+            _window.ClientResize(width, height, liveResize: true);
+            if (!_liveResizeFrames.IsStopped)
+                Game.Tick(waitForNextFrame: false);
+        });
+
+        try
+        {
+            if (MGP.Platform_SetLiveResizeCallback(Handle, Marshal.GetFunctionPointerForDelegate(_liveResizeCallback)) != 0)
+                return;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            // Older native runtimes keep their ordinary post-drag event loop.
+        }
+        _liveResizeCallback = null;
+        _liveResizeFrames = null;
+    }
+
+    private unsafe void StopLiveResize()
+    {
+        _liveResizeFrames?.Stop();
+        if (_liveResizeCallback == null)
+            return;
+        if (Handle != null)
+            MGP.Platform_SetLiveResizeCallback(Handle, 0);
+        _liveResizeCallback = null;
+    }
+#endif
 
 #if BROWSER
     private bool _browserRunning;
@@ -130,6 +207,10 @@ class NativeGamePlatform : GamePlatform
         MGP_Event event_;
         while (MGP.Platform_PollEvent(Handle, out event_) != 0)
         {
+#if !BROWSER
+            if (_liveResizeFrames?.IsStopped == true)
+                break;
+#endif
             switch (event_.Type)
             {
                 case EventType.Quit:
@@ -141,10 +222,9 @@ class NativeGamePlatform : GamePlatform
                     break;
 
                 case EventType.WindowLostFocus:
-                    IsActive = false;
-#if BROWSER
                     Keyboard.Keys.Clear();
-#endif
+                    NativeGameWindow.FromHandle(event_.Window.Window)?.CancelTextInputOnFocusLoss();
+                    IsActive = false;
                     break;
 
                 case EventType.WindowResized:
@@ -169,14 +249,15 @@ class NativeGamePlatform : GamePlatform
                     var key = event_.Key.Key;
                     var character = (char)event_.Key.Character;
 
-                    if (!Keyboard.Keys.Contains(key))
-                        Keyboard.Keys.Add(key);
+                    if (!TextInputKeyState.TrackKeyDown(Keyboard.Keys, key, window?.HasTextComposition == true, IsMacOS))
+                        break;
 
                     if (window != null)
                     { 
                         window.OnKeyDown(new InputKeyEventArgs(key));
 
-                        if (window.IsTextInputHandled && char.IsControl(character))
+                        if (window.IsTextInputHandled && char.IsControl(character)
+                            && !TextInputKeyState.IsMacOSCommand(Keyboard.Keys, IsMacOS))
                             window.OnTextInput(new TextInputEventArgs(character, key));
                     }
 
@@ -198,6 +279,7 @@ class NativeGamePlatform : GamePlatform
 
                 case EventType.TextInput:
                 {
+                    // The native bridge filters direct shortcut text before either text event path.
                     var window = NativeGameWindow.FromHandle(event_.Key.Window);
                     if (window != null && window.IsTextInputHandled)
                     {
@@ -207,6 +289,22 @@ class NativeGamePlatform : GamePlatform
                     }
                     break;
                 }
+
+#if !BROWSER
+                case EventType.TextEditing:
+                case EventType.TextCommit:
+                {
+                    var window = NativeGameWindow.FromHandle(event_.Window.Window);
+                    if (window == null) break;
+                    var text = Marshal.PtrToStringUTF8(MGP.Platform_GetTextEvent(Handle)) ?? string.Empty;
+                    if (event_.Type == EventType.TextEditing)
+                        window.OnTextEditing(text, event_.Window.Data1, event_.Window.Data2);
+                    else
+                        // Filtering by held modifiers here would discard genuine IME commits.
+                        window.OnTextCommitted(text);
+                    break;
+                }
+#endif
 
                 case EventType.MouseMove:
                 {
@@ -396,6 +494,17 @@ class NativeGamePlatform : GamePlatform
 
     protected unsafe override void Dispose(bool disposing)
     {
+#if !BROWSER
+        if (_liveResizeFrames?.IsPolling == true)
+        {
+            // Cocoa/SDL still owns the window and platform until the outer native poll unwinds.
+            _liveResizeFrames.Stop();
+            _deferredDispose = (_deferredDispose ?? false) || disposing;
+            return;
+        }
+        StopLiveResize();
+#endif
+
         if (_window != null)
         {
             _window.Destroy();

@@ -530,6 +530,11 @@ namespace Microsoft.Xna.Framework
         /// </summary>
         public void Tick()
         {
+            Tick(true);
+        }
+
+        internal void Tick(bool waitForNextFrame)
+        {
             // NOTE: This code is very sensitive and can break very badly
             // with even what looks like a safe change.  Be sure to test 
             // any change fully in both the fixed and variable timestep 
@@ -538,7 +543,7 @@ namespace Microsoft.Xna.Framework
 #if !BROWSER
         RetryTick:
 
-            if (!IsActive && (InactiveSleepTime.TotalMilliseconds >= 1.0))
+            if (waitForNextFrame && !IsActive && (InactiveSleepTime.TotalMilliseconds >= 1.0))
             {
                 System.Threading.Thread.Sleep((int)InactiveSleepTime.TotalMilliseconds);
             }
@@ -556,6 +561,8 @@ namespace Microsoft.Xna.Framework
 
             if (IsFixedTimeStep && _accumulatedElapsedTime < TargetElapsedTime)
             {
+                if (!waitForNextFrame)
+                    return;
 #if BROWSER
                 return;
 #else

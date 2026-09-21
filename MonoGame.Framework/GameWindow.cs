@@ -146,6 +146,42 @@ namespace Microsoft.Xna.Framework
 
         internal bool IsTextInputHandled { get { return TextInput != null; } }
 
+        /// <summary>Whether this window provides native preedit, atomic commits and candidate placement.</summary>
+        public virtual bool SupportsTextComposition => false;
+
+        /// <summary>Complete committed text, delivered once before the legacy per-character TextInput events.</summary>
+        public event Action<string> TextCommitted;
+
+        /// <summary>Uncommitted marked text with a UTF-16 selection range. Empty text cancels composition.</summary>
+        public event Action<string, int, int> TextEditing;
+
+        /// <summary>Opts into native composition and starts or stops the focused text-input session.</summary>
+        public virtual bool SetTextInputActive(bool active) => false;
+
+        /// <summary>Positions native candidates at a caret rectangle in drawable pixels, not window points.</summary>
+        public virtual bool SetTextInputRectangle(Rectangle rectangle) => false;
+
+        internal bool HasTextComposition { get; private set; }
+
+        internal void OnTextEditing(string text, int scalarStart, int scalarLength)
+        {
+            text = text ?? string.Empty;
+            HasTextComposition = text.Length != 0;
+            var start = TextCompositionIndex.ToUtf16(text, scalarStart < 0 ? int.MaxValue : scalarStart);
+            var end = scalarStart < 0 ? start : TextCompositionIndex.ToUtf16(text,
+                (int)Math.Min(int.MaxValue, (long)scalarStart + Math.Max(0, scalarLength)));
+            TextEditing?.Invoke(text, start, Math.Max(0, end - start));
+        }
+
+        internal void OnTextCommitted(string text)
+        {
+            HasTextComposition = false;
+            TextCommitted?.Invoke(text);
+            // Existing character subscribers retain their contract, including UTF-16 surrogate pairs.
+            foreach (var character in text)
+                OnTextInput(new TextInputEventArgs(character, Keys.None));
+        }
+
         /// <summary>
         /// Buffered keyboard KeyDown event.
         /// </summary>

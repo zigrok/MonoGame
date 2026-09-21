@@ -28,6 +28,105 @@ To run/filter specific classes/namespaces, an example:
 dotnet test Tests/MonoGame.Tests.DesktopGL.csproj --filter MonoGame.Tests.Visual
 ```
 
+## Native text-input shortcut regressions
+
+These focused checks create no windows and inject no operating-system input.
+Run from the MonoGame directory, with the native/.NET build slot available:
+
+```sh
+mkdir -p Artifacts/Tests/NativeInput
+c++ -std=c++17 -Wall -Wextra -Werror native/monogame/tests/TextInputStateTest.cpp \
+  -o Artifacts/Tests/NativeInput/text-input-state
+Artifacts/Tests/NativeInput/text-input-state
+dotnet test Tests/MonoGame.Tests.DesktopGL.csproj \
+  --filter FullyQualifiedName~TextCompositionIndexTest --disable-build-servers \
+  -m:1 -p:BuildInParallel=false -p:UseSharedCompilation=false \
+  '-p:DefaultItemExcludes=**/obj/**'
+dotnet build MonoGame.Framework/MonoGame.Framework.Native.csproj -c Release \
+  --disable-build-servers -m:1 -p:BuildInParallel=false -p:UseSharedCompilation=false
+```
+
+The exclusion avoids compiling generated C# left by the test asset projects
+under `Tests/Assets/Projects/obj`; it does not delete or alter those artifacts.
+
+On macOS, SDL3 Cocoa dispatches keys before AppKit's normal `sendEvent:` handling.
+Its text responder sends a pending raw key before directly interpreted text, but
+clears that key when committing marked text. Forwarding both events unchanged
+allowed Control+Option+Space to switch input sources **and** type a space.
+
+The native SDL bridge now uses each key event's own modifiers, not the final
+`SDL_GetModState()` after pumping the queue. On macOS, direct Command/Control
+shortcut text is discarded before either rich commits or legacy character
+dispatch. Modified Space is reserved from raw game/UI polling too, including
+repeat and release handling. Other shortcut keys remain available for application
+commands and navigation. This reserves Command/Control+Space even when the user
+has disabled their usual system bindings; it does not attempt to discover every
+custom system shortcut.
+
+Preedit (including the empty event before a commit), key-up, focus loss, text
+session changes, and a drained event queue clear shortcut provenance. This avoids
+rejecting an IME commit merely because a modifier remains held. Option/Shift
+text, dead keys, composed Unicode and Windows AltGr are not shortcut-filtered.
+The managed text handlers intentionally do not apply a held-modifier text veto.
+Their control-character compatibility path and old-runtime Space polling fallback
+use macOS-specific command semantics.
+
+The rich bridge remains opt-in; event layouts and native entry points are
+unchanged by this shortcut fix. The native SDL2/browser translation is unchanged.
+Old native libraries still use the existing capability fallback, but need a rebuilt
+SDL3 runtime for text-event provenance filtering; the managed fallback alone
+cannot reliably reconstruct IME provenance from legacy characters.
+
+The pure tests do not establish real keyboard-layout/IME acceptance. Rebuild a
+fresh native runtime and disposable host, then have the user test actual plain
+spaces, Control+Option+Space, Command/Control shortcuts, Option dead keys and IME
+commits. Do not replace or launch an existing user's host as part of these tests.
+
+## Native macOS live resize
+
+SDL3's Cocoa backend runs a 60 Hz timer in tracking mode and synchronously emits
+`SDL_EVENT_WINDOW_EXPOSED` with `data1 == 1`. The ordinary native poll cannot
+return until the border drag ends; processing queued resize events alone only
+fixes the final frame. Native MonoGame now watches that specific notification
+while the synchronous game loop is polling and calls its normal Update/Draw
+tick on the owning main thread. No sample/host resize adapter is required.
+
+Logical client bounds are refreshed from SDL, then the existing swapchain-size
+sync updates the physical backbuffer, viewport, scissor and Metal depth/MSAA
+targets **before** layout notifications and Update. The callback never pumps
+events or echoes the user resize through `SDL_SetWindowSize`. Queued macOS resize
+events read current dimensions instead of reverting to pre-callback geometry.
+Fixed-step games retain their timing but do not sleep/spin inside the tracking
+callback when the next update is not due. `SuppressDraw`/`BeginDraw` remain in
+control; the callback does not directly force presentation.
+
+The watch exists only during `Game.Run`'s synchronous native loop; hidden,
+minimized, unfocused and foreign-thread events are ignored. `RunOneFrame`,
+manual hidden probes, browser, SDL2 and non-macOS loops are unchanged. Reentrant
+frames are rejected. Callback failures are captured and rethrown after the
+native poll returns; disposal during a callback stops frames and defers native
+window/platform destruction until that same return. Exit and exceptions remove
+the watch before releasing its rooted managed delegate. The new optional
+registration entry point does not change existing event structs or exports:
+older native binaries fall back to their post-drag behavior.
+
+With the native/.NET build slot available, run the windowless dispatcher tests:
+
+```sh
+dotnet test Tests/MonoGame.Tests.DesktopGL.csproj \
+  --filter FullyQualifiedName~LiveResizeFrameDispatcherTest --disable-build-servers \
+  -m:1 -p:BuildInParallel=false -p:UseSharedCompilation=false \
+  '-p:DefaultItemExcludes=**/obj/**'
+```
+
+These tests establish callback thread affinity, polling-only eligibility,
+nonreentrancy, disposal and exception containment, not visible Cocoa/Metal
+acceptance. Rebuild a **new** runtime and disposable host; the user must verify
+continuous layout and animation while dragging (including pausing without
+releasing), Retina sizing, no size rollback on release, then focus/selection,
+IME and hide/minimize/exit behavior. Do not launch or replace an existing user's
+host or remove hidden/offscreen activation guards for this test.
+
 ## Rendering Tests
 
 ### Desktop Metal backbuffer preservation

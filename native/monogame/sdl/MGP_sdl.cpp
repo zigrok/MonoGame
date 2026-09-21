@@ -5,6 +5,7 @@
 #include "api_MGP.h"
 
 #include "mg_common.h"
+#include "MGP_TextInputState.h"
 
 #if defined(MG_SDL3)
 #include <SDL3/SDL.h>
@@ -35,6 +36,12 @@ struct MGP_Platform
     std::vector<MGP_Window*> windows;
     std::queue<MGP_Event> queued_events;
     std::map<mgint, SDL_GameController*> controllers;
+    std::string text_event;
+#if defined(MG_SDL3) && defined(__APPLE__)
+    void (*live_resize_callback)(MGP_Window*, mgint, mgint) = nullptr;
+    bool polling = false;
+    bool live_resize_frame = false;
+#endif
 };
 
 static std::map<int, MGKeys> s_keymap
@@ -197,6 +204,9 @@ struct MGP_Window
 	std::string identifier;
 
     SDL_Window* window = nullptr;
+    bool rich_text_input = false;
+    bool text_input_active = false;
+    MGP_TextInputState text_input_state;
 };
 
 struct MGP_Cursor
@@ -256,6 +266,8 @@ MGP_Platform* MGP_Platform_Create(MGGameRunBehavior& behavior)
 void MGP_Platform_Destroy(MGP_Platform* platform)
 {
 	assert(platform != nullptr);
+
+    MGP_Platform_SetLiveResizeCallback(platform, nullptr);
 
 	// Destroy any active windows that may have been leaked.
 	for (auto window : platform->windows)
@@ -373,6 +385,56 @@ static MGP_Window* MGP_WindowFromId(MGP_Platform* platform, Uint32 windowId)
     return nullptr;
 }
 
+#if defined(MG_SDL3) && defined(__APPLE__)
+static bool SDLCALL MGP_LiveResizeWatch(void* userdata, SDL_Event* event)
+{
+    // SDL's Cocoa tracking-mode timer sends these on the main thread, even while PollEvent blocks.
+    if (event->type != SDL_EVENT_WINDOW_EXPOSED || event->window.data1 != 1 || !SDL_IsMainThread())
+        return true;
+
+    auto platform = static_cast<MGP_Platform*>(userdata);
+    if (!platform->polling || platform->live_resize_frame || !platform->live_resize_callback)
+        return true;
+
+    auto window = MGP_WindowFromId(platform, event->window.windowID);
+    if (!window)
+        return true;
+    const auto flags = SDL_GetWindowFlags(window->window);
+    if ((flags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED)) != 0 || !(flags & SDL_WINDOW_INPUT_FOCUS))
+        return true;
+
+    int width = 0, height = 0;
+    if (!SDL_GetWindowSize(window->window, &width, &height) || width <= 0 || height <= 0)
+        return true;
+
+    platform->live_resize_frame = true;
+    platform->live_resize_callback(window, width, height);
+    platform->live_resize_frame = false;
+    return true;
+}
+#endif
+
+mgbyte MGP_Platform_SetLiveResizeCallback(MGP_Platform* platform, void* callback)
+{
+#if defined(MG_SDL3) && defined(__APPLE__)
+    if (callback && !SDL_IsMainThread())
+        return false;
+    if (platform->live_resize_callback)
+        SDL_RemoveEventWatch(MGP_LiveResizeWatch, platform);
+    platform->live_resize_callback = reinterpret_cast<void (*)(MGP_Window*, mgint, mgint)>(callback);
+    if (callback && !SDL_AddEventWatch(MGP_LiveResizeWatch, platform))
+    {
+        platform->live_resize_callback = nullptr;
+        return false;
+    }
+    return true;
+#else
+    (void)platform;
+    (void)callback;
+    return false;
+#endif
+}
+
 static int UTF8ToUnicode(int utf8)
 {
     int byte4 = utf8 & 0xFF,
@@ -467,9 +529,25 @@ static MGControllerInput FromSDLAxis(Uint8 axis)
     }
 }
 
+void* MGP_Platform_GetTextEvent(MGP_Platform* platform)
+{
+    // Owned by the platform until its next poll; managed code copies it before polling again.
+    return const_cast<char*>(platform->text_event.c_str());
+}
+
 mgbyte MGP_Platform_PollEvent(MGP_Platform* platform, MGP_Event& event_)
 {
 	assert(platform != nullptr);
+
+#if defined(MG_SDL3) && defined(__APPLE__)
+    struct PollScope
+    {
+        MGP_Platform* platform;
+        bool previous;
+        explicit PollScope(MGP_Platform* value) : platform(value), previous(value->polling) { platform->polling = true; }
+        ~PollScope() { platform->polling = previous; }
+    } pollScope(platform);
+#endif
 
     SDL_Event ev;
 
@@ -608,8 +686,26 @@ mgbyte MGP_Platform_PollEvent(MGP_Platform* platform, MGP_Event& event_)
         {
             event_.Type = MGEventType::KeyDown;
 
-            event_.Key.Window = MGP_WindowFromId(platform, ev.key.windowID);
+            auto window = MGP_WindowFromId(platform, ev.key.windowID);
+            event_.Key.Window = window;
 #if defined(MG_SDL3)
+            if (window != nullptr)
+            {
+#if defined(SDL_PLATFORM_MACOS)
+                constexpr bool macos = true;
+#else
+                constexpr bool macos = false;
+#endif
+                const bool modifier = ev.key.scancode >= SDL_SCANCODE_LCTRL && ev.key.scancode <= SDL_SCANCODE_RGUI;
+                if (!window->text_input_state.KeyDown(macos,
+                    (ev.key.mod & (SDL_KMOD_CTRL | SDL_KMOD_GUI)) != 0, modifier,
+                    ev.key.scancode == SDL_SCANCODE_SPACE))
+                {
+                    if (!window->text_input_state.release_space)
+                        break;
+                    event_.Type = MGEventType::KeyUp;
+                }
+            }
             // SDL3 flattened SDL_KeyboardEvent: the keysym struct is gone; the keycode is ev.key.key.
             event_.Key.Character = ev.key.key;
             event_.Key.Key = ToXNA(ev.key.key);
@@ -624,8 +720,11 @@ mgbyte MGP_Platform_PollEvent(MGP_Platform* platform, MGP_Event& event_)
         {
             event_.Type = MGEventType::KeyUp;
 
-            event_.Key.Window = MGP_WindowFromId(platform, ev.key.windowID);
+            auto window = MGP_WindowFromId(platform, ev.key.windowID);
+            event_.Key.Window = window;
 #if defined(MG_SDL3)
+            if (window != nullptr && !window->text_input_state.KeyUp(ev.key.scancode == SDL_SCANCODE_SPACE))
+                break;
             event_.Key.Character = ev.key.key;
             event_.Key.Key = ToXNA(ev.key.key);
 #else
@@ -636,8 +735,41 @@ mgbyte MGP_Platform_PollEvent(MGP_Platform* platform, MGP_Event& event_)
             return true;
         }
 
+#if defined(MG_SDL3)
+        case SDL_EVENT_TEXT_EDITING:
+        {
+            auto window = MGP_WindowFromId(platform, ev.edit.windowID);
+            // Empty preedit precedes a real IME commit too; never filter it by held modifiers.
+            if (window != nullptr)
+                window->text_input_state.Clear();
+            if (window == nullptr || !window->rich_text_input || !window->text_input_active)
+                break;
+            platform->text_event = ev.edit.text ? ev.edit.text : "";
+            event_.Type = MGEventType::TextEditing;
+            event_.Window.Window = window;
+            event_.Window.Data1 = ev.edit.start;
+            event_.Window.Data2 = ev.edit.length;
+            return true;
+        }
+#endif
         case SDL_TEXTINPUT:
         {
+#if defined(MG_SDL3)
+            auto window = MGP_WindowFromId(platform, ev.text.windowID);
+            if (window != nullptr && !window->text_input_state.Commit())
+                break;
+            if (window != nullptr && window->rich_text_input)
+            {
+                if (!window->text_input_active)
+                    break;
+                platform->text_event = ev.text.text ? ev.text.text : "";
+                event_.Type = MGEventType::TextCommit;
+                event_.Window.Window = window;
+                event_.Window.Data1 = 0;
+                event_.Window.Data2 = 0;
+                return true;
+            }
+#endif
             event_.Type = MGEventType::TextInput;
             event_.Key.Window = MGP_WindowFromId(platform, ev.text.windowID);
 
@@ -715,15 +847,28 @@ mgbyte MGP_Platform_PollEvent(MGP_Platform* platform, MGP_Event& event_)
             event_.Type = MGEventType::WindowResized;
             event_.Window.Data1 = ev.window.data1;
             event_.Window.Data2 = ev.window.data2;
+#if defined(__APPLE__)
+            // A tracking-mode frame may already have consumed newer geometry than this queued event.
+            if (event_.Window.Window)
+            {
+                auto window = static_cast<MGP_Window*>(event_.Window.Window);
+                SDL_GetWindowSize(window->window, &event_.Window.Data1, &event_.Window.Data2);
+            }
+#endif
             return true;
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
             event_.Window.Window = MGP_WindowFromId(platform, ev.window.windowID);
             event_.Type = MGEventType::WindowGainedFocus;
             return true;
         case SDL_EVENT_WINDOW_FOCUS_LOST:
+        {
             event_.Window.Window = MGP_WindowFromId(platform, ev.window.windowID);
+            auto window = static_cast<MGP_Window*>(event_.Window.Window);
+            if (window != nullptr)
+                window->text_input_state.Reset();
             event_.Type = MGEventType::WindowLostFocus;
             return true;
+        }
         case SDL_EVENT_WINDOW_MOVED:
             event_.Window.Window = MGP_WindowFromId(platform, ev.window.windowID);
             event_.Type = MGEventType::WindowMoved;
@@ -795,6 +940,9 @@ mgbyte MGP_Platform_PollEvent(MGP_Platform* platform, MGP_Event& event_)
         }
     }
 
+    // A later, asynchronous IME commit has no relationship to an earlier shortcut.
+    for (auto window : platform->windows)
+        window->text_input_state.Clear();
     return false;
 }
 
@@ -910,6 +1058,46 @@ MGP_Window* MGP_Window_Create(
 	platform->windows.push_back(window);
 
 	return window;
+}
+
+mgbyte MGP_Window_SupportsTextComposition(MGP_Window* window)
+{
+#if defined(MG_SDL3)
+    return window != nullptr && window->window != nullptr;
+#else
+    return false;
+#endif
+}
+
+mgbyte MGP_Window_SetTextInputActive(MGP_Window* window, mgbyte active)
+{
+#if defined(MG_SDL3)
+    window->rich_text_input = true;
+    window->text_input_state.Clear();
+    if (active)
+    {
+        if (!SDL_StartTextInput(window->window))
+            return false;
+        window->text_input_active = true;
+        return true;
+    }
+    window->text_input_active = false;
+    // Clear marked text without converting it into a commit on focus transfer.
+    SDL_ClearComposition(window->window);
+    return SDL_StopTextInput(window->window);
+#else
+    return false;
+#endif
+}
+
+mgbyte MGP_Window_SetTextInputRectangle(MGP_Window* window, mgint x, mgint y, mgint width, mgint height)
+{
+#if defined(MG_SDL3)
+    SDL_Rect area = { x, y, width, height };
+    return SDL_SetTextInputArea(window->window, &area, 0);
+#else
+    return false;
+#endif
 }
 
 void MGP_Window_Destroy(MGP_Window* window)

@@ -22,6 +22,54 @@ internal class NativeGameWindow : GameWindow
 
     private int _width;
     private int _height;
+    private bool? _supportsTextComposition;
+    private bool _textInputActive;
+
+    public override unsafe bool SupportsTextComposition
+    {
+        get
+        {
+#if BROWSER
+            return false;
+#else
+            if (!_supportsTextComposition.HasValue)
+            {
+                try { _supportsTextComposition = MGP.Window_SupportsTextComposition(_handle) != 0; }
+                catch (EntryPointNotFoundException) { _supportsTextComposition = false; }
+            }
+            return _supportsTextComposition.Value;
+#endif
+        }
+    }
+
+    public override unsafe bool SetTextInputActive(bool active)
+    {
+#if BROWSER
+        return false;
+#else
+        if (!SupportsTextComposition) return false;
+        if (MGP.Window_SetTextInputActive(_handle, (byte)(active ? 1 : 0)) == 0) return false;
+        _textInputActive = active;
+        if (!active) OnTextEditing(string.Empty, 0, 0);
+        return true;
+#endif
+    }
+
+    public override unsafe bool SetTextInputRectangle(Rectangle rectangle)
+    {
+#if BROWSER
+        return false;
+#else
+        if (!SupportsTextComposition) return false;
+        var area = TextInputGeometry.ToWindowPoints(rectangle, Scale);
+        return MGP.Window_SetTextInputRectangle(_handle, area.X, area.Y, area.Width, area.Height) != 0;
+#endif
+    }
+
+    internal void CancelTextInputOnFocusLoss()
+    {
+        if (_textInputActive) SetTextInputActive(false);
+    }
 
     /// <summary>
     /// Physical drawable pixels per logical point for this window (1 unless HiDPI/Retina). The
@@ -209,16 +257,22 @@ internal class NativeGameWindow : GameWindow
         MGP.Window_SetClientSize(_handle, pointsWidth, pointsHeight);
     }
 
-    public unsafe void ClientResize(int width, int height)
+    public unsafe void ClientResize(int width, int height, bool liveResize = false)
     {
-        if (_width == width && _height == height)
-            return;
+        bool changed = _width != width || _height != height;
 
         _width = width;
         _height = height;
 
+        if (liveResize)
+            _platform.Game.GraphicsDevice?.SyncBackBufferToSwapchain();
+
+        if (!changed)
+            return;
+
 #if !BROWSER
-        MGP.Window_SetClientSize(_handle, width, height);
+        if (!liveResize)
+            MGP.Window_SetClientSize(_handle, width, height);
 #endif
 
         OnClientSizeChanged();
