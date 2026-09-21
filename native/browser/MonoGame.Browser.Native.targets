@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <MonoGameBrowserNativeRoot>$(MSBuildThisFileDirectory)../../Artifacts/browser/native</MonoGameBrowserNativeRoot>
+    <MonoGameBrowserNativeRoot Condition="'$(MonoGameBrowserNativeRoot)' == ''">$(MSBuildThisFileDirectory)../../Artifacts/browser/native</MonoGameBrowserNativeRoot>
     <RunAOTCompilation>false</RunAOTCompilation>
     <PublishTrimmed>false</PublishTrimmed>
     <WasmBuildNative>true</WasmBuildNative>
@@ -14,6 +14,8 @@
   <Target Name="CheckMonoGameBrowserNative" BeforeTargets="PrepareForBuild">
     <Error Condition="!Exists('$(MonoGameBrowserNativeRoot)/mgruntime.a')"
            Text="Build native MonoGame browser libraries first: bash MonoGame/native/browser/build.sh" />
+    <Error Condition="!Exists('$(MonoGameBrowserNativeRoot)/sdl3/libSDL3.a') Or !Exists('$(MonoGameBrowserNativeRoot)/faudio/libFAudio.a')"
+           Text="MonoGameBrowserNativeRoot must contain matching source-built SDL3 and FAudio archives." />
     <Error Condition="'$(RuntimeIdentifier)' != 'browser-wasm'"
            Text="MonoGame.Browser.Native.targets requires RuntimeIdentifier=browser-wasm." />
   </Target>

@@ -5,6 +5,27 @@
 local vulkan_sdk = os.getenv("VULKAN_SDK")
 
 newoption {
+    trigger = "artifacts-root",
+    value = "PATH",
+    description = "Isolated absolute directory for generated projects, objects and binaries"
+}
+newoption {
+    trigger = "sdl3-build",
+    value = "PATH",
+    description = "Directory containing the matching source-built SDL3 static library"
+}
+newoption {
+    trigger = "faudio-build",
+    value = "PATH",
+    description = "Directory containing the matching source-built FAudio static library"
+}
+newoption {
+    trigger = "metal-shaders",
+    value = "PATH",
+    description = "Directory containing freshly generated Vulkan-profile stock effect headers"
+}
+
+newoption {
     trigger = "arch",
     value = "ARCH",
     description = "Target architecture (x64 or arm64)",
@@ -56,6 +77,9 @@ function common(project_name)
             platform_target_path = "../../Artifacts/native/mgruntime/" .. variant .. "/%{cfg.system}/" .. target_arch .. "/%{cfg.buildcfg}"
         end
     end
+    if _OPTIONS["artifacts-root"] then
+        platform_target_path = path.join(_OPTIONS["artifacts-root"], "bin", variant, "%{cfg.buildcfg}")
+    end
     kind "SharedLib"
     language "C++"
     filter "system:linux"
@@ -65,6 +89,9 @@ function common(project_name)
     targetdir(platform_target_path)
     -- Per-variant object dir so the SDL2 and SDL3 builds don't share stale objects.
     objdir("obj/" .. variant)
+    if _OPTIONS["artifacts-root"] then
+        objdir(path.join(_OPTIONS["artifacts-root"], "obj", variant, "%{cfg.buildcfg}"))
+    end
     targetname "mgruntime"
     cppdialect "C++17"
 
@@ -100,6 +127,7 @@ end
 -- SDL3 (default, or explicit via --sdl=3). Shares the same MGP sources as sdl2(); the sources are
 -- #if MG_SDL2 / MG_SDL3 guarded. SDL3 headers live under external/sdl3/include (SDL3/*.h).
 function sdl3()
+    local sdl_build = _OPTIONS["sdl3-build"] or "external/sdl3/build"
     -- SDL_ENABLE_OLD_NAMES turns on SDL3's official compat aliases for renamed-but-unchanged
     -- SDL2 symbols, so the shared MGP sources only need #if MG_SDL3 branches at genuine
     -- structural/semantic divergences (events, keysym, return types, surface/display/handle APIs).
@@ -113,8 +141,8 @@ function sdl3()
     links {"external/sdl3/build/%{cfg.platform}/Release/SDL3-static.lib", "winmm", "imm32", "user32", "gdi32", "advapi32",
            "setupapi", "ole32", "oleaut32", "version", "shell32"}
     filter {"system:macosx"}
-    libdirs {"external/sdl3/build"}
-    linkoptions {"-Wl,-force_load,external/sdl3/build/libSDL3.a"}
+    libdirs {sdl_build}
+    linkoptions {"-Wl,-force_load," .. sdl_build .. "/libSDL3.a"}
     links {"SDL3"}
     links {"Cocoa.framework", "IOKit.framework", "ForceFeedback.framework", "CoreAudio.framework",
         "AudioToolbox.framework", "CoreGraphics.framework", "CoreFoundation.framework", "Metal.framework",
@@ -185,7 +213,7 @@ function metal()
 
     -- "vulkan" is on the include path so metal/ can #include the shared *.vk.mgfxo.h effect blobs;
     -- SPIRV-Cross headers include each other by bare name, so its root is also an include directory.
-    includedirs {"vulkan", "external/spirv-cross"}
+    includedirs {_OPTIONS["metal-shaders"] or "vulkan", "external/spirv-cross"}
 
     filter {"system:macosx"}
     links {"Metal.framework", "MetalKit.framework", "QuartzCore.framework", "Foundation.framework",
@@ -209,7 +237,8 @@ function faudio()
 
     -- FAudio uses SDL as its platform layer (threads/audio-device/IO), so it must be built against
     -- the SAME SDL major version we link. SDL3 uses build-sdl3; the SDL2 fallback uses build.
-    local faudio_build = (_OPTIONS["sdl"] == "3") and "external/faudio/build-sdl3" or "external/faudio/build"
+    local faudio_build = _OPTIONS["faudio-build"] or
+        ((_OPTIONS["sdl"] == "3") and "external/faudio/build-sdl3" or "external/faudio/build")
 
     filter {"system:windows"}
     libdirs {faudio_build .. "/%{cfg.platform}/Release"}
@@ -256,6 +285,9 @@ function configs()
 end
 
 workspace "monogame"
+if _OPTIONS["artifacts-root"] then
+    location(path.join(_OPTIONS["artifacts-root"], "projects"))
+end
 configurations {"Debug", "Release"}
 if os.target() == "windows" then
     platforms { "x64", "arm64" }
@@ -278,6 +310,10 @@ if os.target() == "macosx" then
     targetname "mgmetalcompiler"
     targetdir "../../Artifacts/native/mgmetalcompiler/%{cfg.system}/%{cfg.buildcfg}"
     objdir "obj/mgmetalcompiler"
+    if _OPTIONS["artifacts-root"] then
+        targetdir(path.join(_OPTIONS["artifacts-root"], "bin", "mgmetalcompiler", "%{cfg.buildcfg}"))
+        objdir(path.join(_OPTIONS["artifacts-root"], "obj", "mgmetalcompiler", "%{cfg.buildcfg}"))
+    end
     files {
         "tools/metalcompiler/main.cpp",
         "metal/MGMetalShaderTranspiler.h",

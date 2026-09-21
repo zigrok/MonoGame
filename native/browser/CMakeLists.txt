@@ -10,6 +10,8 @@ set(SDL_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(BUILD_SDL3 ON CACHE BOOL "" FORCE)
 set(XNASONG OFF CACHE BOOL "" FORCE)
+set(MONOGAME_BROWSER_SHADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../Artifacts/browser/shaders"
+  CACHE PATH "Directory containing the generated BrowserGL stock effect headers")
 add_subdirectory(../monogame/external/sdl3 sdl3)
 add_subdirectory(../monogame/external/faudio faudio)
 add_library(mgruntime STATIC
@@ -27,5 +29,5 @@ target_compile_features(mgruntime PRIVATE cxx_std_17)
 target_compile_definitions(mgruntime PRIVATE MG_SDL3 MG_GLES SDL_ENABLE_OLD_NAMES DLL_EXPORT)
 target_include_directories(mgruntime PRIVATE
   ../monogame/include ../monogame/common ../../external/stb
-  ../../Artifacts/browser/shaders)
+  "${MONOGAME_BROWSER_SHADER_DIR}")
 target_link_libraries(mgruntime PRIVATE SDL3::SDL3-static FAudio-static)
