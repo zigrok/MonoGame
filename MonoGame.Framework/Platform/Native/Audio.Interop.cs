@@ -171,6 +171,15 @@ internal static unsafe partial class MGA
     [DllImport(MGP.MonoGameNativeDLL, EntryPoint = "MGA_Voice_GetPosition", ExactSpelling = true)]
     public static extern ulong Voice_GetPosition(MGA_Voice* voice);
 
+    [DllImport(MGP.MonoGameNativeDLL, EntryPoint = "MGA_Voice_GetSamplesPlayed", ExactSpelling = true)]
+    public static extern ulong Voice_GetSamplesPlayed(MGA_Voice* voice);
+
+    [DllImport(MGP.MonoGameNativeDLL, EntryPoint = "MGA_GetLivePcmBufferBytes", ExactSpelling = true)]
+    public static extern ulong GetLivePcmBufferBytes();
+
+    [DllImport(MGP.MonoGameNativeDLL, EntryPoint = "MGA_Voice_GetPcmBufferMemory", ExactSpelling = true)]
+    public static extern void Voice_GetPcmBufferMemory(MGA_Voice* voice, out ulong allocatedBytes, out ulong queuedBytes);
+
     [DllImport(MGP.MonoGameNativeDLL, EntryPoint = "MGA_Voice_SetPan", ExactSpelling = true)]
     public static extern void Voice_SetPan(MGA_Voice* voice, float pan);
 
@@ -194,5 +203,3 @@ internal static unsafe partial class MGA
 
     #endregion
 }
-
-

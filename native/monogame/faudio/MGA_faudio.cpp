@@ -21,11 +21,19 @@
 
 struct MGA_VoiceCallbacks;
 
+static std::atomic<mgulong> livePcmBufferBytes{0};
+
+mgulong MGA_GetLivePcmBufferBytes()
+{
+	return livePcmBufferBytes.load(std::memory_order_relaxed);
+}
+
 struct MGA_RawBuffer
 {
 	MGA_Voice* voice = nullptr;
 	uint8_t* data = nullptr;
 	uint32_t length = 0;
+	uint32_t queuedBytes = 0;
 };
 
 struct MGA_System
@@ -40,7 +48,6 @@ struct MGA_System
 	MGA_VoiceCallbacks* callbacks = nullptr;
 
 	std::mutex lock;
-	std::vector<MGA_RawBuffer*> freeRawBuffers;
 };
 
 struct MGA_Buffer
@@ -77,6 +84,7 @@ struct MGA_Voice
 	FAudioWaveFormatEx format;
 
 	std::atomic<int> finishedBuffers = 0;
+	std::vector<MGA_RawBuffer*> rawBuffers;
 
 	float pan = 0.0f;
 	float reverbMix = 0.0f;
@@ -110,10 +118,9 @@ public:
 
 		auto callbacks = (MGA_VoiceCallbacks*)callback;
 
-		++raw->voice->finishedBuffers;
-
 		std::lock_guard guard(callbacks->_system->lock);
-		callbacks->_system->freeRawBuffers.push_back(raw);
+		++raw->voice->finishedBuffers;
+		raw->queuedBytes = 0;
 	}
 };
 
@@ -215,11 +222,6 @@ void MGA_System_Destroy(MGA_System* system)
 
 
 	// Destroy system resources.
-	for (auto raw : system->freeRawBuffers)
-	{
-		free(raw->data);
-		delete raw;
-	}
 	if (system->reverbVoice)
 		FAudioVoice_DestroyVoice(system->reverbVoice);
 	if (system->reverbEffect)
@@ -543,6 +545,16 @@ void MGA_Voice_Destroy(MGA_Voice* voice)
 	if (voice->voice)
 		FAudioVoice_DestroyVoice(voice->voice);
 
+	// DestroyVoice quiesces callbacks but does not return outstanding buffer contexts.
+	for (auto raw : voice->rawBuffers)
+	{
+		if (raw->data != nullptr)
+		{
+			free(raw->data);
+			livePcmBufferBytes.fetch_sub(raw->length, std::memory_order_relaxed);
+		}
+		delete raw;
+	}
 	delete voice;
 }
 
@@ -552,6 +564,16 @@ mgint MGA_Voice_GetBufferCount(MGA_Voice* voice)
 
 	if (voice->voice == nullptr)
 		return 0;
+
+	if (voice->buffer == nullptr)
+	{
+		std::lock_guard guard(voice->system->lock);
+		mgint count = 0;
+		for (auto raw : voice->rawBuffers)
+			if (raw->queuedBytes != 0)
+				++count;
+		return count;
+	}
 
 	FAudioVoiceState state;
 	FAudioSourceVoice_GetState(voice->voice, &state, FAUDIO_VOICE_NOSAMPLESPLAYED);
@@ -613,37 +635,46 @@ void MGA_Voice_AppendBuffer(MGA_Voice* voice, mgbyte* buffer, mguint size)
 {
 	assert(voice != nullptr);
 	assert(buffer != nullptr);
+	assert(size > 0);
 
 	if (voice->voice == nullptr)
 		return;
 
-	// Find a free buffer.
+	// Reuse only this voice's capacity; callbacks still retiring count as queued.
 	MGA_RawBuffer* raw = nullptr;
 	{
 		std::lock_guard guard(voice->system->lock);
 
-		auto& freeRawBuffers = voice->system->freeRawBuffers;		
-		for (int i = 0; i < freeRawBuffers.size(); i++)
+		for (auto candidate : voice->rawBuffers)
 		{
-			auto r = freeRawBuffers[i];
-			if (r->length < size)
+			if (candidate->queuedBytes != 0)
 				continue;
-
-			raw = r;
-			freeRawBuffers.erase(freeRawBuffers.begin() + i);
+			raw = candidate;
+			break;
 		}
+
+		if (raw == nullptr)
+		{
+			raw = new MGA_RawBuffer;
+			raw->voice = voice;
+			voice->rawBuffers.push_back(raw);
+		}
+		if (raw->length < size)
+		{
+			if (raw->data != nullptr)
+			{
+				free(raw->data);
+				livePcmBufferBytes.fetch_sub(raw->length, std::memory_order_relaxed);
+			}
+			auto data = (uint8_t*)malloc(size);
+			assert(data != nullptr);
+			if (data != nullptr)
+				livePcmBufferBytes.fetch_add(size, std::memory_order_relaxed);
+			raw->data = data;
+			raw->length = size;
+		}
+		raw->queuedBytes = size;
 	}
-
-	if (raw == nullptr)
-	{
-		auto& format = voice->format;
-
-		raw = new MGA_RawBuffer;
-		raw->data = (uint8_t*)malloc(size);
-		raw->length = size;
-	}
-
-	raw->voice = voice;
 
 	assert(raw->length >= size);
 	memcpy(raw->data, buffer, size);
@@ -655,7 +686,26 @@ void MGA_Voice_AppendBuffer(MGA_Voice* voice, mgbyte* buffer, mguint size)
 	vbuffer.AudioBytes = size;
 	vbuffer.pContext = raw;
 
-	FAudioSourceVoice_SubmitSourceBuffer(voice->voice, &vbuffer, nullptr);
+	auto result = FAudioSourceVoice_SubmitSourceBuffer(voice->voice, &vbuffer, nullptr);
+	if (result != 0)
+	{
+		std::lock_guard guard(voice->system->lock);
+		raw->queuedBytes = 0;
+	}
+	assert(result == 0);
+}
+
+void MGA_Voice_GetPcmBufferMemory(MGA_Voice* voice, mgulong* allocatedBytes, mgulong* queuedBytes)
+{
+	assert(voice != nullptr);
+	assert(allocatedBytes != nullptr && queuedBytes != nullptr);
+	*allocatedBytes = *queuedBytes = 0;
+	std::lock_guard guard(voice->system->lock);
+	for (auto raw : voice->rawBuffers)
+	{
+		*allocatedBytes += raw->length;
+		*queuedBytes += raw->queuedBytes;
+	}
 }
 
 void MGA_Voice_Play(MGA_Voice* voice, mgbyte looped)
@@ -762,6 +812,17 @@ mgulong MGA_Voice_GetPosition(MGA_Voice* voice)
 
 	float msec = (state.SamplesPlayed / (float)voice->format.nSamplesPerSec) * 1000.0f;
 	return (mgulong)msec;
+}
+
+mgulong MGA_Voice_GetSamplesPlayed(MGA_Voice* voice)
+{
+	assert(voice != nullptr);
+	if (voice->voice == nullptr)
+		return 0;
+
+	FAudioVoiceState state;
+	FAudioSourceVoice_GetState(voice->voice, &state, 0);
+	return state.SamplesPlayed;
 }
 
 static void MGA_Voice_UpdateOutputMatrix(MGA_Voice* voice)
