@@ -46,15 +46,16 @@ bool MGMTL_SpirvToMsl(
 
         for (auto& resource : resources.uniform_buffers)
             pin(resource.id, resource.base_type_id, -1, -1, MG_MTL_CBUFFER_INDEX);
+        // SPIRV-Cross keys by stage/set/binding, shared by paired images and samplers.
         for (auto& resource : resources.separate_images)
         {
             int slot = static_cast<int>(msl.get_decoration(resource.id, spv::DecorationBinding)) - SlotOffset;
-            pin(resource.id, resource.base_type_id, slot, -1, -1);
+            pin(resource.id, resource.base_type_id, slot, slot, -1);
         }
         for (auto& resource : resources.separate_samplers)
         {
             int slot = static_cast<int>(msl.get_decoration(resource.id, spv::DecorationBinding)) - SlotOffset;
-            pin(resource.id, resource.base_type_id, -1, slot, -1);
+            pin(resource.id, resource.base_type_id, slot, slot, -1);
         }
         for (auto& resource : resources.sampled_images)
         {
