@@ -1330,6 +1330,25 @@ MGG_Buffer* MGG_Buffer_Create(MGG_GraphicsDevice* device, MGBufferType type, mgb
 void MGG_Buffer_Destroy(MGG_GraphicsDevice* device, MGG_Buffer* buffer)
 {
     if (!buffer) return;
+    // Draw state borrows CPU wrappers; Metal retaining an encoded buffer cannot keep these alive.
+    for (int s = 0; s < NUM_STAGES; s++)
+        if (device->uniforms[s] == buffer)
+        {
+            device->uniforms[s] = nullptr;
+            device->bindingsDirty = true;
+        }
+    for (int i = 0; i < MAX_VERTEX_BUFFERS; i++)
+        if (device->vertexBuffers[i] == buffer)
+        {
+            device->vertexBuffers[i] = nullptr;
+            device->vertexOffsets[i] = 0;
+            device->vertexDirty |= (1u << i);
+        }
+    if (device->indexBuffer == buffer)
+    {
+        device->indexBuffer = nullptr;
+        device->indexDirty = true;
+    }
     buffer->buffer = nil;
     delete buffer;
 }

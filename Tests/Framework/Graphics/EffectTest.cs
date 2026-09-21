@@ -115,6 +115,52 @@ namespace MonoGame.Tests.Graphics
         }
 
         [Test]
+        public void DisposedEffectConstantBuffersMustNotRemainBoundForDefaultSpriteBatch()
+        {
+            var device = game.GraphicsDevice;
+            using var texture = new Texture2D(device, 1, 1);
+            using var target = new RenderTarget2D(device, 8, 8, false, SurfaceFormat.Color,
+                DepthFormat.None, 0, RenderTargetUsage.PreserveContents);
+            texture.SetData(new[] { Color.White });
+            var pixels = new Color[64];
+            try
+            {
+                using (var effect = new AlphaTestEffect(device)
+                {
+                    Projection = Matrix.CreateOrthographicOffCenter(0, 8, 8, 0, 0, 1)
+                })
+                using (var batch = new SpriteBatch(device))
+                {
+                    device.SetRenderTarget(target);
+                    device.Clear(Color.Transparent);
+                    batch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, SamplerState.PointClamp,
+                        DepthStencilState.None, RasterizerState.CullNone, effect);
+                    batch.Draw(texture, new Rectangle(0, 0, 8, 8), Color.White);
+                    batch.End();
+                    device.SetRenderTarget(null);
+                    target.GetData(pixels);
+                    Assert.That(pixels, Is.All.EqualTo(Color.White));
+                }
+
+                using var nextBatch = new SpriteBatch(device);
+                device.SetRenderTarget(target);
+                device.Clear(Color.Transparent);
+                nextBatch.Begin(SpriteSortMode.Immediate, BlendState.Opaque, SamplerState.PointClamp,
+                    DepthStencilState.None, RasterizerState.CullNone);
+                nextBatch.Draw(texture, new Rectangle(0, 0, 8, 8), Color.CornflowerBlue);
+                nextBatch.End();
+                device.SetRenderTarget(null);
+                target.GetData(pixels);
+                Assert.That(pixels, Is.All.EqualTo(Color.CornflowerBlue));
+            }
+            finally
+            {
+                device.SetRenderTarget(null);
+                device.Textures[0] = null;
+            }
+        }
+
+        [Test]
 #if DESKTOPGL
         [Ignore("Fails under OpenGL!")]
 #endif
