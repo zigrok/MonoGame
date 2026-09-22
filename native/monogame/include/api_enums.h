@@ -543,6 +543,9 @@ enum class MGGraphicsBackend : mgint
     Metal = 3,
     DirectX12 = 4,
     WebGL = 5,
+    // Must stay in step with MonoGame.Framework.Utilities.GraphicsBackend, which the managed side
+    // casts this value straight into.
+    Headless = 6,
 };
 
 enum class MGSystemCursor : mgint

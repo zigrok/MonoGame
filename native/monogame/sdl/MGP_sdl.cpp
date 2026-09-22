@@ -348,6 +348,8 @@ MGGraphicsBackend MGP_Platform_GetGraphicsBackend()
     return MGGraphicsBackend::DirectX12;
 #elif MG_METAL
     return MGGraphicsBackend::Metal;
+#elif MG_HEADLESS
+    return MGGraphicsBackend::Headless;
 #else
     assert(false);
     return (MGGraphicsBackend)-1;
@@ -999,6 +1001,10 @@ MGP_Window* MGP_Window_Create(
 	flags |= SDL_WINDOW_VULKAN;
 #elif defined(MG_DIRECTX12)
     // DirectX 12 only needs the HWND exposed by SDL; no SDL graphics flag is required.
+#elif defined(MG_HEADLESS)
+    // No graphics flag at all. This is what lets SDL_VIDEODRIVER=dummy create the window: the dummy
+    // driver has no Metal/Vulkan/GL support, so requesting one of those flags fails outright. The
+    // window is already SDL_WINDOW_HIDDEN above, so nothing is shown either way.
 #elif defined(MG_METAL)
 	flags |= SDL_WINDOW_METAL;
 #elif defined(MG_GLES)

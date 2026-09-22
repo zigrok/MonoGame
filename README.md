@@ -38,6 +38,7 @@ existing game code and third-party libraries (Myra, FontStashSharp, …) bind to
 | **SDL3 platform layer** | `native/monogame/sdl`, submodule `external/sdl3` | Upstream 3.8.x ships SDL2. Native builds can carry both; the Metal and DX12 backends prefer SDL3. |
 | **Metal graphics backend** | `native/monogame/metal` (`desktopmetal`) | Renders directly to a `CAMetalLayer`. Translates the Vulkan-profile SPIR-V effects to MSL at runtime with **vendored SPIRV-Cross** — **no MoltenVK and no Vulkan SDK**. |
 | **Browser / WebGL2 target** | `native/browser` | SDL3, FAudio and MGG statically linked into the .NET interpreter's single WebAssembly module. Rendering goes through the native `MGG_*` ABI on GLES3/WebGL2, *not* a JavaScript renderer. No pthreads, no SDL2 port. |
+| **Headless backend** | `native/monogame/headless` (`desktopheadless`) | No window, no GPU, no display server. Implements the full `MGG_*` ABI as no-ops so `Game.Run()`'s update/draw loop executes for automated tests. Nothing rasterizes — see [HEADLESS.md](HEADLESS.md). |
 | **Direct3D 12 backend** | `native/monogame/directx12` (`windowsdx`) | Paired with XAudio. |
 | **Vulkan backend** | `native/monogame/vulkan` (`desktopvk`) | Entry points via **volk**, device memory via **VMA**; MoltenVK on macOS. |
 | **High-DPI back buffers** | `GraphicsDeviceManager.AllowHighDpi` | Opt-in on DesktopGL/SDL: the window stays in logical points while the back buffer and viewport are physical pixels, so rendering is crisp instead of OS-upscaled. The Native platform derives its scale from `MGP_Window_GetDrawableSize` and needs no opt-in. |
@@ -57,6 +58,7 @@ One managed API, two managed implementations. The Native implementation pairs wi
 | **Native — `desktopmetal`** (macOS) | `MonoGame.Framework.Native` + `libmgruntime` | SDL2 or SDL3 (static, MGP) | Metal (MGG), direct `CAMetalLayer` | FAudio (MGA) |
 | **Native — `windowsdx`** (Windows/Xbox) | `MonoGame.Framework.Native` + `libmgruntime` | SDL2 or SDL3 (static, MGP) | Direct3D 12 (MGG) | XAudio (MGA) |
 | **Native — browser** | `MonoGame.Framework.Browser` + static WASM module | SDL3 (static, MGP) | GLES3 / WebGL2 (MGG) | FAudio (MGA) |
+| **Native — `desktopheadless`** | `MonoGame.Framework.Native` + `libmgruntime` | SDL3 with the dummy video driver (static, MGP) | none — no-op (MGG) | FAudio (MGA) |
 
 `libmgruntime` is modular: **MGP** = platform (windowing/input, `sdl/MGP_sdl.cpp`), **MGG** =
 graphics (`vulkan/MGG_Vulkan.cpp`, `metal/MGG_Metal.mm`, `directx12/MGG_DX12.cpp`), **MGA** = audio

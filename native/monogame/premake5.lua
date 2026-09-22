@@ -41,6 +41,11 @@ newoption {
     description = "Generate only the native Metal project without requiring the Vulkan SDK"
 }
 
+newoption {
+    trigger = "headless-only",
+    description = "Generate only the headless project, requiring neither the Vulkan SDK nor Xcode"
+}
+
 -- Which SDL major version the platform layer (MGP) is built against. SDL3 is the default;
 -- SDL2 remains available as an explicit fallback. The MGP sources are shared and guarded.
 newoption {
@@ -144,8 +149,13 @@ function sdl3()
     libdirs {sdl_build}
     linkoptions {"-Wl,-force_load," .. sdl_build .. "/libSDL3.a"}
     links {"SDL3"}
+    -- QuartzCore is SDL's own dependency, not the Metal backend's: SDL_cocoavulkan.m references
+    -- CAMetalLayer unconditionally, whatever graphics backend is linked alongside it. It went
+    -- unnoticed while every macOS target also linked metal(), which pulls QuartzCore in itself —
+    -- the headless target is the first one here that doesn't, and it failed to link without this.
     links {"Cocoa.framework", "IOKit.framework", "ForceFeedback.framework", "CoreAudio.framework",
         "AudioToolbox.framework", "CoreGraphics.framework", "CoreFoundation.framework", "Metal.framework",
+        "QuartzCore.framework",
         "CoreVideo.framework", "GameController.framework", "CoreHaptics.framework", "Carbon.framework",
         "UniformTypeIdentifiers.framework", "AVFoundation.framework", "CoreMedia.framework", "iconv"}
 
@@ -197,6 +207,17 @@ end
 -- Metal is the native macOS/iOS graphics backend. It renders straight to a CAMetalLayer (no MoltenVK),
 -- reusing the Vulkan backend's compiled effect headers (vulkan/*.vk.mgfxo.h: SPIR-V + reflection header)
 -- and translating SPIR-V -> MSL at runtime via the pinned SPIRV-Cross submodule. Obj-C++ (.mm).
+function headless()
+    defines {"MG_HEADLESS"}
+
+    files {"headless/**.h", "headless/**.cpp"}
+
+    -- "vulkan" is on the include path for the shared *.vk.mgfxo.h effect blobs, exactly as metal()
+    -- does: the headless backend reports the same shader profile (80) so it consumes the same
+    -- compiled effect content as the real desktop backends.
+    includedirs {_OPTIONS["metal-shaders"] or "vulkan"}
+end
+
 function metal()
     defines {"MG_METAL"}
 
@@ -293,7 +314,7 @@ if os.target() == "windows" then
     platforms { "x64", "arm64" }
 end
 
-if not _OPTIONS["metal-only"] then
+if not _OPTIONS["metal-only"] and not _OPTIONS["headless-only"] then
     project "desktopvk"
     common("desktopvk")
     sdl()
@@ -302,7 +323,16 @@ if not _OPTIONS["metal-only"] then
     configs()
 end
 
-if os.target() == "macosx" then
+-- Ungated deliberately: headless has no external SDK dependency of any kind, so it must generate on
+-- a machine with neither the Vulkan SDK nor Xcode. That is exactly the machine it exists for.
+project "desktopheadless"
+common("desktopheadless")
+sdl()
+headless()
+faudio()
+configs()
+
+if os.target() == "macosx" and not _OPTIONS["headless-only"] then
     project "mgmetalcompiler"
     kind "ConsoleApp"
     language "C++"
