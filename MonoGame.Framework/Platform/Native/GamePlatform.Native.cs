@@ -202,6 +202,33 @@ class NativeGamePlatform : GamePlatform
     }
 #endif
 
+#if !BROWSER
+    /// <summary>
+    /// Runs one iteration of what <see cref="RunLoop"/> does, for a host that owns the loop itself.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Game.Tick"/> alone is not a frame. The window system is serviced by PollEvents,
+    /// which only RunLoop calls, so a host that drives Tick directly gets a window that is never
+    /// mapped, never resized and never told anything by the OS -- it exists in the window server at
+    /// zero size and nothing is ever drawn where a person can see it.
+    /// </remarks>
+    /// <returns>False once the game has exited.</returns>
+    internal bool TickHostedFrame()
+    {
+        PollEvents();
+
+        if (_window == null || (_isExiting > 0 && ShouldExit())) return false;
+
+        Game.Tick();
+        Threading.Run();
+
+        if (_isExiting > 0 && ShouldExit()) return false;
+
+        _isExiting = 0;
+        return true;
+    }
+#endif
+
     private unsafe void PollEvents()
     {
         MGP_Event event_;

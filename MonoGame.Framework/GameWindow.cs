@@ -73,6 +73,24 @@ namespace Microsoft.Xna.Framework
 		public virtual IntPtr PlatformHandle => IntPtr.Zero;
 
 	    /// <summary>
+	    /// Whether the window is on screen.
+	    /// <para>
+	    /// <see cref="Game.Run()"/> shows the window itself, so a normal game never sets this. It
+	    /// exists for a host that drives the loop with <see cref="Game.RunOneFrame"/> or
+	    /// <see cref="Game.Tick"/> instead: those never enter the run loop, so without this the
+	    /// window stays hidden for the life of the process and the game appears not to start.
+	    /// </para>
+	    /// <para>
+	    /// Backends that cannot hide or show a window report true and ignore writes.
+	    /// </para>
+	    /// </summary>
+		public virtual bool IsVisible
+		{
+			get { return true; }
+			set { }
+		}
+
+	    /// <summary>
 	    /// The name of the screen the window is currently on.
 	    /// </summary>
 		public abstract string ScreenDeviceName { get; }

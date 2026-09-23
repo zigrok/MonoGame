@@ -288,8 +288,18 @@ internal class NativeGameWindow : GameWindow
         MGP.Window_SetTitle(_handle, title);
     }
 
+    /// <inheritdoc />
+    public override bool IsVisible
+    {
+        get { return _isVisible; }
+        set { Show(value); }
+    }
+
+    private bool _isVisible;
+
     internal unsafe void Show(bool show)
     {
+        _isVisible = show;
         MGP.Window_Show(_handle, (byte)(show ? 1 : 0));
     }
 
