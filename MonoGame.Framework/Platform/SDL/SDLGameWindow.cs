@@ -67,6 +67,22 @@ namespace Microsoft.Xna.Framework
             get { return _handle; }
         }
 
+        /// <inheritdoc />
+        /// <remarks>
+        /// Resolved through SDL2's <c>SDL_GetWindowWMInfo</c>. Only macOS is wired up so far;
+        /// everywhere else this reports zero and callers degrade, which is the contract.
+        /// </remarks>
+        public override IntPtr PlatformHandle
+        {
+            get { return GetPlatformNativeWindow(); }
+        }
+
+        /// <summary>
+        /// The operating system's window object, or zero when this platform has no implementation.
+        /// Defined per platform in a partial; this is the fallback for the ones that do not.
+        /// </summary>
+        private partial IntPtr GetPlatformNativeWindow();
+
         public override string ScreenDeviceName
         {
             get { return _screenDeviceName; }

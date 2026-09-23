@@ -53,6 +53,15 @@ namespace Microsoft.Xna.Framework
             }
         }
 
+        /// <summary>
+        /// The window's <c>NSWindow*</c>, which is what an OS integration needs -- an accessibility
+        /// adapter, a native menu, an IME panel. Zero on any other platform.
+        /// </summary>
+        private partial IntPtr GetPlatformNativeWindow()
+        {
+            return CurrentPlatform.OS == OS.MacOSX ? GetMacNativeWindow() : IntPtr.Zero;
+        }
+
         private IntPtr GetMacNativeWindow()
         {
             var info = new Sdl.Window.SDL_SysWMinfo { version = Sdl.version };
