@@ -136,6 +136,10 @@ internal class NativeGameWindow : GameWindow
 
     public override IntPtr Handle { get; }
 
+    /// <inheritdoc />
+    /// <remarks>Resolved from SDL's window properties; null under the dummy video driver.</remarks>
+    public override IntPtr PlatformHandle { get; }
+
     public override string ScreenDeviceName { get; }
 
     public override unsafe Point Position
@@ -194,6 +198,7 @@ internal class NativeGameWindow : GameWindow
         }
 
         Handle = MGP.Window_GetNativeHandle(_handle);
+        PlatformHandle = MGP.Window_GetPlatformHandle(_handle);
 
         // NB: the HiDPI backing scale is read on demand via the Scale property (below), not cached
         // here — the density isn't known while the window is still hidden/unrealized.

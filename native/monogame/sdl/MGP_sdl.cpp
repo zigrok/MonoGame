@@ -1135,6 +1135,34 @@ void* MGP_Window_GetNativeHandle(MGP_Window* window)
 	return window->window;
 }
 
+void* MGP_Window_GetPlatformHandle(MGP_Window* window)
+{
+	assert(window != nullptr);
+	assert(window->window != nullptr);
+
+#if defined(MG_SDL3)
+	auto props = SDL_GetWindowProperties(window->window);
+	if (props == 0)
+		return nullptr;
+
+#if defined(__APPLE__)
+	return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+#elif defined(_WIN32)
+	return SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+#else
+	// X11 window ids are numbers, not pointers; widened so one accessor serves every platform.
+	return reinterpret_cast<void*>(
+		static_cast<intptr_t>(SDL_GetNumberProperty(props, SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0)));
+#endif
+
+#else
+	// SDL2 reaches the same handles through SDL_SysWMinfo. Left unimplemented rather than guessed
+	// at: every backend this fork ships is SDL3, and a wrong pointer here is a crash in whichever
+	// OS API receives it.
+	return nullptr;
+#endif
+}
+
 mgulong MGP_Window_GetSdlFlags(MGP_Window* window)
 {
     assert(window != nullptr);

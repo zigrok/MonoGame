@@ -39,6 +39,12 @@ MG_EXPORT MGP_Window* MGP_Window_Create(MGP_Platform* platform, mgint& width, mg
 MG_EXPORT void MGP_Window_Destroy(MGP_Window* window);
 MG_EXPORT void MGP_Window_SetIconBitmap(MGP_Window* window, mgbyte* icon, mgint length);
 MG_EXPORT void* MGP_Window_GetNativeHandle(MGP_Window* window);
+// The operating system's own window object - NSWindow* on macOS, HWND on Windows, the X11 window
+// id on Linux - as opposed to MGP_Window_GetNativeHandle, which returns the SDL_Window*. Platform
+// integrations that have to talk to the OS rather than to SDL need this one: an accessibility
+// adapter, a native menu, an IME panel. Null when the backend has no real window, which is the
+// normal answer under the headless runtime and the dummy video driver, so callers must handle it.
+MG_EXPORT void* MGP_Window_GetPlatformHandle(MGP_Window* window);
 MG_EXPORT mgulong MGP_Window_GetSdlFlags(MGP_Window* window);
 MG_EXPORT mgbyte MGP_Window_GetAllowUserResizing(MGP_Window* window);
 MG_EXPORT void MGP_Window_SetAllowUserResizing(MGP_Window* window, mgbyte allow);

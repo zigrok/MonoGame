@@ -56,6 +56,23 @@ namespace Microsoft.Xna.Framework
 		public abstract IntPtr Handle { get; }
 
 	    /// <summary>
+	    /// The operating system's own window object, as opposed to the windowing backend's:
+	    /// <c>NSWindow*</c> on macOS, <c>HWND</c> on Windows, the X11 window id on Linux.
+	    /// <para>
+	    /// <see cref="Handle"/> is whatever the backend uses - an <c>SDL_Window*</c> under SDL - so
+	    /// it is the wrong thing to hand to an OS API. This is what a platform integration that
+	    /// talks to the operating system rather than to the backend needs: an accessibility
+	    /// adapter, a native menu, an IME panel.
+	    /// </para>
+	    /// <para>
+	    /// <see cref="IntPtr.Zero"/> when the backend does not expose one or there is no real
+	    /// window, which is the normal answer under a headless runtime or a dummy video driver.
+	    /// Callers must handle that rather than assume a window exists.
+	    /// </para>
+	    /// </summary>
+		public virtual IntPtr PlatformHandle => IntPtr.Zero;
+
+	    /// <summary>
 	    /// The name of the screen the window is currently on.
 	    /// </summary>
 		public abstract string ScreenDeviceName { get; }
