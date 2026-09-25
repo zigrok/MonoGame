@@ -30,7 +30,7 @@ internal class NativeGameWindow : GameWindow
         get
         {
 #if BROWSER
-            return false;
+            return MonoGame.Framework.BrowserGameLoop.TextCompositionEnabled;
 #else
             if (!_supportsTextComposition.HasValue)
             {
@@ -45,7 +45,11 @@ internal class NativeGameWindow : GameWindow
     public override unsafe bool SetTextInputActive(bool active)
     {
 #if BROWSER
-        return false;
+        if (!SupportsTextComposition) return false;
+        _textInputActive = active;
+        MonoGame.Framework.BrowserGameLoop.SetTextInputState(active, active ? MonoGame.Framework.BrowserGameLoop.TextInputRectangle : null);
+        if (!active) OnTextEditing(string.Empty, 0, 0);
+        return true;
 #else
         if (!SupportsTextComposition) return false;
         if (MGP.Window_SetTextInputActive(_handle, (byte)(active ? 1 : 0)) == 0) return false;
@@ -58,7 +62,9 @@ internal class NativeGameWindow : GameWindow
     public override unsafe bool SetTextInputRectangle(Rectangle rectangle)
     {
 #if BROWSER
-        return false;
+        if (!SupportsTextComposition) return false;
+        MonoGame.Framework.BrowserGameLoop.SetTextInputState(_textInputActive, rectangle);
+        return true;
 #else
         if (!SupportsTextComposition) return false;
         var area = TextInputGeometry.ToWindowPoints(rectangle, Scale);

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Microsoft.Xna.Framework;
 
@@ -40,5 +41,48 @@ public static class BrowserGameLoop
         manager.PreferredBackBufferWidth = pixelWidth;
         manager.PreferredBackBufferHeight = pixelHeight;
         manager.ApplyChanges();
+    }
+
+    private static readonly Queue<(bool Commit, string Text, int Start, int Length)> PendingText = new();
+
+    /// <summary>
+    /// Routes browser text through composition-aware commits. SDL's Emscripten backend only reports
+    /// per-key text, so an IME needs the host page's editable proxy to call <see cref="ComposeText"/>
+    /// and <see cref="CommitText"/>. Read once when the UI binds its text adapter.
+    /// </summary>
+    public static bool TextCompositionEnabled { get; set; } = true;
+
+    /// <summary>Whether the focused game control currently accepts text.</summary>
+    public static bool TextInputActive { get; private set; }
+
+    /// <summary>The focused caret rectangle in drawable pixels, for placing the host's candidate window.</summary>
+    public static Rectangle? TextInputRectangle { get; private set; }
+
+    internal static void SetTextInputState(bool active, Rectangle? rectangle)
+    {
+        TextInputActive = active;
+        TextInputRectangle = rectangle;
+        if (!active) PendingText.Clear();
+    }
+
+    /// <summary>Queues marked (preedit) text; the selection is in Unicode scalars. Empty text cancels.</summary>
+    public static void ComposeText(string text, int scalarStart, int scalarLength) =>
+        PendingText.Enqueue((false, text ?? string.Empty, scalarStart, scalarLength));
+
+    /// <summary>Queues committed text, delivered once as a commit on the next frame.</summary>
+    public static void CommitText(string text)
+    {
+        if (!string.IsNullOrEmpty(text)) PendingText.Enqueue((true, text, 0, 0));
+    }
+
+    internal static void DispatchText(GameWindow window)
+    {
+        while (PendingText.Count > 0)
+        {
+            var (commit, text, start, length) = PendingText.Dequeue();
+            if (!TextInputActive) continue;
+            if (commit) window.OnTextCommitted(text);
+            else window.OnTextEditing(text, start, length);
+        }
     }
 }

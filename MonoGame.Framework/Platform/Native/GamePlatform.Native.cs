@@ -30,6 +30,8 @@ class NativeGamePlatform : GamePlatform
     private readonly List<string> _dropList = new List<string>(64);
 
     private int _isExiting;
+    private readonly InputReleaseLatch _releaseLatch = new InputReleaseLatch();
+    private MGP_Event? _deferredRelease;
 
 #if !BROWSER
     private MGP.LiveResizeCallback _liveResizeCallback;
@@ -188,6 +190,8 @@ class NativeGamePlatform : GamePlatform
             throw new InvalidOperationException("The WebGL2 context was lost. Restart the page to recreate the native graphics resources.");
         }
         PollEvents();
+        if (Window is NativeGameWindow browserWindow)
+            MonoGame.Framework.BrowserGameLoop.DispatchText(browserWindow);
         if (_isExiting > 0 && ShouldExit())
         {
             _browserRunning = false;
@@ -204,13 +208,32 @@ class NativeGamePlatform : GamePlatform
 
     private unsafe void PollEvents()
     {
-        MGP_Event event_;
-        while (MGP.Platform_PollEvent(Handle, out event_) != 0)
+        MGP_Event event_ = default;
+        _releaseLatch.BeginDrain();
+        var pending = _deferredRelease.HasValue;
+        if (pending)
         {
+            event_ = _deferredRelease.Value;
+            _deferredRelease = null;
+        }
+        while (pending || MGP.Platform_PollEvent(Handle, out event_) != 0)
+        {
+            pending = false;
 #if !BROWSER
             if (_liveResizeFrames?.IsStopped == true)
                 break;
 #endif
+            // A release drained with its own press would erase it before any frame observed it; hold it one frame.
+            if (event_.Type == EventType.MouseButtonUp && _releaseLatch.DefersButtonUp((int)event_.MouseButton.Button) ||
+                event_.Type == EventType.KeyUp && _releaseLatch.DefersKeyUp(event_.Key.Key))
+            {
+                _deferredRelease = event_;
+                break;
+            }
+            if (event_.Type == EventType.MouseButtonDown)
+                _releaseLatch.ButtonDown((int)event_.MouseButton.Button);
+            else if (event_.Type == EventType.KeyDown)
+                _releaseLatch.KeyDown(event_.Key.Key);
             switch (event_.Type)
             {
                 case EventType.Quit:
@@ -285,6 +308,13 @@ class NativeGamePlatform : GamePlatform
                     {
                         var key = event_.Key.Key;
                         var character = (char)event_.Key.Character;
+#if BROWSER
+                        if (window.SupportsTextComposition)
+                        {
+                            window.OnTextCommitted(character.ToString());
+                            break;
+                        }
+#endif
                         window.OnTextInput(new TextInputEventArgs(character, key));
                     }
                     break;
