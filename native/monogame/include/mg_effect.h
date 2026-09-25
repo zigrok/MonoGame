@@ -9,9 +9,11 @@
 #define MG_BUILTIN_EFFECT_SYMBOL(name) name##_dx12_mgfxo
 #elif defined(MG_GLES)
 #define MG_BUILTIN_EFFECT_SYMBOL(name) name##_gl_mgfxo
-#elif defined(MG_VULKAN) || defined(MG_METAL)
+#elif defined(MG_VULKAN) || defined(MG_METAL) || defined(MG_HEADLESS)
 // The Metal backend reuses the Vulkan-compiled effect blobs (SPIR-V + reflection header) and
-// translates SPIR-V -> MSL at runtime, so it consumes the same *_vk_mgfxo symbols.
+// translates SPIR-V -> MSL at runtime, so it consumes the same *_vk_mgfxo symbols. The headless
+// backend reports the same shader profile (80) and never executes a shader, so it reuses them too
+// — that way effect loading behaves identically whether a test runs headless or on a real device.
 #define MG_BUILTIN_EFFECT_SYMBOL(name) name##_vk_mgfxo
 #else
 #error "Unsupported graphics backend, this header is intended for native builtin effects embedding only."

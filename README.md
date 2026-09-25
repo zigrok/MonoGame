@@ -2,132 +2,176 @@
  <a href="https://monogame.net/">
    <img height="128" alt="MonoGame" src="https://raw.githubusercontent.com/MonoGame/MonoGame.Logo/refs/heads/master/FullColorOnLight/LogoOnly_128px.png">
  </a>
- <h1>MonoGame</h1>
-
- [![Join the chat at https://discord.gg/monogame](https://img.shields.io/discord/355231098122272778?style=flat-square&color=%237289DA&label=Discord%20server&logo=discord&logoColor=white)](https://discord.gg/monogame) 
- ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/monogame/monogame/main.yml?style=flat-square)
- [![Donate](https://img.shields.io/badge/donate-F1465A?style=flat-square&logo=monogame&logoColor=FFFFFF)](https://monogame.net/donate/) 
+ <h1>MonoGame — <code>zigrok</code> fork</h1>
 
  One framework for creating powerful cross-platform games
 
-[Supported Platforms](#supported-platforms) • 
-[Resources](#resources) • 
-[Samples](#samples) • 
-[Support and Contributions](#support-and-contributions) • 
-[Source Code](#source-code) • 
-[Helpful Links](#helpful-links) • 
+[What this fork adds](#what-this-fork-adds) •
+[Backends](#backends) •
+[Building the divergent targets](#building-the-divergent-targets) •
+[Relationship to upstream](#relationship-to-upstream) •
+[Upstream resources](#upstream-resources) •
 [License](#license)
 </div>
 
-## Overview
+## About this fork
 
-**MonoGame** is a simple and powerful .NET framework for creating games for desktop PCs, video game consoles, and mobile devices using the C# programming language. It has been successfully used to create games such as [Streets of Rage 4](https://store.steampowered.com/app/985890/Streets_of_Rage_4/), [Carrion](https://store.steampowered.com/app/953490/CARRION/), [Celeste](https://store.steampowered.com/app/504230/Celeste/), [Stardew Valley](https://store.steampowered.com/app/413150/Stardew_Valley/), and [many others](https://monogame.net/showcase/).
+This is a fork of [MonoGame](https://github.com/MonoGame/MonoGame), the open-source
+re-implementation of Microsoft's XNA Framework. It tracks upstream's `develop` branch and adds
+platform and backend work that is not in upstream 3.8.x: an **SDL3** platform layer, a direct
+**Metal** graphics backend on macOS, a **browser (WebGL2) target** built with Emscripten, plus
+high-DPI, live-resize and native text-input support.
 
-It is an open-source re-implementation of the discontinued [Microsoft's XNA Framework](https://msdn.microsoft.com/en-us/library/bb200104.aspx).
+Everything here preserves the **`MonoGame.Framework` assembly identity and the XNA-style API**, so
+existing game code and third-party libraries (Myra, FontStashSharp, …) bind to it unchanged.
 
-## Supported Platforms
+> [!IMPORTANT]
+> Published upstream runtime packages such as `MonoGame.Runtime.Mac.Vulkan` are **not** compatible
+> with this fork's managed layer — they predate native exports added here and fail at startup with
+> errors like `Unable to find an entry point named 'MGP_Window_GetDrawableSize'`. Build the native
+> runtime from source (see [Building the divergent targets](#building-the-divergent-targets)).
 
-We support a growing list of platforms across the desktop, mobile, and console space. If there is a platform we do not support, please [make a request](https://github.com/MonoGame/MonoGame/issues) or [come help us](CONTRIBUTING.md) add it.
+## What this fork adds
 
-* Desktop PCs
-  * Windows 10 (22H2+) and up (OpenGL[^1] & DirectX 10[^2])
-  * Linux[^3] and up (OpenGL[^1])
-  * macOS 13 "Ventura" and up (OpenGL[^1])
-* Mobile/Tablet Devices
-  * Android 6 (API 23) and up (OpenGL)
-  * iOS/iPadOS 12.2 and up (OpenGL)
-* [Consoles (for registered developers)](https://docs.monogame.net/articles/console_access.html)
-  * PlayStation 4
-  * PlayStation 5
-  * Xbox (GDKX & XDK)
-  * Nintendo Switch 1 & 2
+| Addition | Where | Notes |
+| --- | --- | --- |
+| **SDL3 platform layer** | `native/monogame/sdl`, submodule `external/sdl3` | Upstream 3.8.x ships SDL2. Native builds can carry both; the Metal and DX12 backends prefer SDL3. |
+| **Metal graphics backend** | `native/monogame/metal` (`desktopmetal`) | Renders directly to a `CAMetalLayer`. Translates the Vulkan-profile SPIR-V effects to MSL at runtime with **vendored SPIRV-Cross** — **no MoltenVK and no Vulkan SDK**. |
+| **Browser / WebGL2 target** | `native/browser` | SDL3, FAudio and MGG statically linked into the .NET interpreter's single WebAssembly module. Rendering goes through the native `MGG_*` ABI on GLES3/WebGL2, *not* a JavaScript renderer. No pthreads, no SDL2 port. |
+| **Headless backend** | `native/monogame/headless` (`desktopheadless`) | No window, no GPU, no display server. Implements the full `MGG_*` ABI as no-ops so `Game.Run()`'s update/draw loop executes for automated tests. Nothing rasterizes — see [HEADLESS.md](HEADLESS.md). |
+| **Direct3D 12 backend** | `native/monogame/directx12` (`windowsdx`) | Paired with XAudio. |
+| **Vulkan backend** | `native/monogame/vulkan` (`desktopvk`) | Entry points via **volk**, device memory via **VMA**; MoltenVK on macOS. |
+| **High-DPI back buffers** | `GraphicsDeviceManager.AllowHighDpi` | Opt-in on DesktopGL/SDL: the window stays in logical points while the back buffer and viewport are physical pixels, so rendering is crisp instead of OS-upscaled. The Native platform derives its scale from `MGP_Window_GetDrawableSize` and needs no opt-in. |
+| **Live resize** | `Platform/Native/GameWindow.Native.cs` | Runs the ordinary update/draw tick during Cocoa live-resize notifications, so a macOS resize drag stays live instead of freezing. Native platform only — SDL and browser loops keep their previous behaviour. |
+| **Native text input / IME** | `GameWindow.SupportsTextComposition`, `TextCommitted`, `TextEditing` | SDL3 preedit is separated from whole-string commits, with scalar selections converted to UTF-16 and candidate rectangles translated from drawable to window space. Rich events are opt-in with capability fallback for older native libraries. |
+| **`GraphicsBackend` values** | `Utilities/GraphicsBackend.cs` | Adds `Vulkan`, `Metal`, `DirectX12` and `WebGL` (`5`) alongside `DirectX` and `OpenGL`, so consumers can select resources per backend. |
 
-> [!NOTE]
-> Vulkan and DirectX12 graphics support is also being added in **preview** for `3.8.5` for supported platforms.
+## Backends
 
-[^1]: An experimental Vulkan implementation is available to source code users.
+One managed API, two managed implementations. The Native implementation pairs with one of several
+`libmgruntime` graphics modules; all variants produce the same managed assembly name.
 
-[^2]: An experimental DirectX 12 implementation is available to source code users.
+| Backend | Assembly / lib | Windowing + input | Graphics | Audio |
+| --- | --- | --- | --- | --- |
+| **DesktopGL** (mature managed backend) | `MonoGame.Framework.DesktopGL` | SDL2 (managed P/Invoke) | OpenGL | OpenAL |
+| **Native — `desktopvk`** | `MonoGame.Framework.Native` + `libmgruntime` | SDL2 or SDL3 (static, MGP) | Vulkan (MGG); MoltenVK on macOS | FAudio (MGA) |
+| **Native — `desktopmetal`** (macOS) | `MonoGame.Framework.Native` + `libmgruntime` | SDL2 or SDL3 (static, MGP) | Metal (MGG), direct `CAMetalLayer` | FAudio (MGA) |
+| **Native — `windowsdx`** (Windows/Xbox) | `MonoGame.Framework.Native` + `libmgruntime` | SDL2 or SDL3 (static, MGP) | Direct3D 12 (MGG) | XAudio (MGA) |
+| **Native — browser** | `MonoGame.Framework.Browser` + static WASM module | SDL3 (static, MGP) | GLES3 / WebGL2 (MGG) | FAudio (MGA) |
+| **Native — `desktopheadless`** | `MonoGame.Framework.Native` + `libmgruntime` | SDL3 with the dummy video driver (static, MGP) | none — no-op (MGG) | FAudio (MGA) |
 
-[^3]: Requires a distribution with glibc 2.27 or up. This includes SteamOS 3.0 and up, Ubuntu 22.04 and up, Debian 12 and up, CentOS 9 and up among other unlisted distributions.
+`libmgruntime` is modular: **MGP** = platform (windowing/input, `sdl/MGP_sdl.cpp`), **MGG** =
+graphics (`vulkan/MGG_Vulkan.cpp`, `metal/MGG_Metal.mm`, `directx12/MGG_DX12.cpp`), **MGA** = audio
+(`faudio/MGA_faudio.cpp`, `xaudio/MGA_xaudio2.cpp`).
 
-## Resources
+For the full dependency graph and per-edge notes, see [BACKEND-DEPENDENCIES.md](BACKEND-DEPENDENCIES.md).
+
+## Building the divergent targets
+
+Start with the usual clone and submodule setup:
+
+```sh
+git clone --recurse-submodules https://github.com/zigrok/MonoGame.git
+git submodule update --init
+```
+
+### Browser (WebGL2)
+
+The Emscripten toolchain comes from the pinned .NET `wasm-tools` workload — **never a global
+emsdk**. The verified toolchain is .NET SDK **10.0.103**, **wasm-tools 10.0.110** and its Emscripten
+**3.1.56 / pack 10.0.10**; SDL3 is pinned to **3.4.16**. Initialise the `sdl3`, `faudio`, `stb` and
+`spirv-cross` submodules first.
+
+```sh
+bash native/browser/build.sh
+dotnet build MonoGame.Framework/MonoGame.Framework.Browser.csproj -c Release
+```
+
+Host integration: reference `MonoGame.Framework.Browser.csproj`, import
+`native/browser/MonoGame.Browser.Native.targets` into the **executable** project, supply
+`<canvas id="canvas">` with `.withModuleConfig({ canvas })`, call `game.Run()` once, then drive
+`MonoGame.Framework.BrowserGameLoop.Tick(game)` from a single `requestAnimationFrame` callback
+(`false` means exit). Browser shader format **81** is intentionally incompatible with Vulkan format
+80 and legacy OpenGL format 0. Details in [`native/browser/README.md`](native/browser/README.md).
+
+### Metal (macOS)
+
+No Vulkan SDK is required — `desktopmetal` compiles the vendored `external/spirv-cross` sources and
+links only Apple frameworks. (The Vulkan SDK applies to `desktopvk`, not to Metal; see
+[METAL-VULKAN-SDK-DEPENDENCY.md](METAL-VULKAN-SDK-DEPENDENCY.md) for the background.) You need
+`premake5`, Xcode's Metal toolchain, and the `external/spirv-cross` submodule.
+
+macOS native builds are **universal binaries**, so SDL3 and FAudio must be built fat or the link
+fails with `symbol(s) not found for architecture x86_64`.
+
+```sh
+cd native/monogame
+
+# 1. Static, universal dependencies
+cmake -S external/sdl3 -B external/sdl3/build -DSDL_STATIC=ON -DSDL_SHARED=OFF \
+  -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
+cmake --build external/sdl3/build --config Release --parallel 4
+cmake -S external/faudio -B external/faudio/build-sdl3 -DBUILD_SHARED_LIBS=OFF -DBUILD_SDL3=ON \
+  -DCMAKE_C_STANDARD_INCLUDE_DIRECTORIES="$PWD/external/sdl3/include" -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15
+cmake --build external/faudio/build-sdl3 --config Release --parallel 4
+
+# 2. Stock effects at the Vulkan profile (translated to MSL at runtime). Gitignored, not checked in.
+cd vulkan
+for fx in ../../../MonoGame.Framework/Platform/Graphics/Effect/Resources/*.fx; do
+  dotnet ../../../Artifacts/MonoGame.Effect.Compiler/Release/mgfxc.dll \
+    "$fx" "$(basename "$fx" .fx).vk.mgfxo.h" /Profile:Vulkan
+done
+cd ..
+
+# 3. The runtime
+premake5 --arch=arm64 --metal-only gmake
+make config=release desktopmetal mgmetalcompiler
+```
+
+The result is `Artifacts/native/mgruntime/desktopmetal/macosx/Release/libmgruntime.dylib`.
+
+The equivalent automated path is the repo's own build tasks: `Build Native Dependencies` →
+`Build Vulkan Shaders` → `Build Native Metal` (`dotnet run --project build/Build.csproj -- --target="Build Native Metal"`).
+
+## Relationship to upstream
+
+This fork tracks upstream `develop` and rebases fork work on top of it, so its history diverges from
+upstream tags. Bugs that reproduce on stock MonoGame belong in the
+[upstream issue tracker](https://github.com/MonoGame/MonoGame/issues); anything specific to the
+additions listed above belongs in this repository.
+
+Upstream's own preview work covers Vulkan and DirectX 12 for `3.8.5`; the SDL3 layer, the direct
+Metal backend, the browser target and the platform fixes listed above are specific to this fork.
+
+## Upstream resources
+
+The upstream documentation applies to the managed API, which is unchanged here.
 
 * [Getting started →](https://docs.monogame.net/articles/tutorials/building_2d_games/)
 * ["How To" Guides →](https://docs.monogame.net/articles/getting_to_know/howto/)
 * [Documentation Hub →](https://docs.monogame.net/)
 * [API Reference →](https://docs.monogame.net/api/index.html)
-* [Community Tutorials →](https://docs.monogame.net/articles/tutorials/)
+* [Game samples](https://github.com/MonoGame/MonoGame.Samples) maintained by the MonoGame team
 
-## Samples
+To support the upstream project, see the [MonoGame donation page](https://monogame.net/donate/).
 
-Check out the awesome [game samples](https://github.com/MonoGame/MonoGame.Samples) maintained by the MonoGame team:
-
-|[Platformer 2D Sample](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/Platformer2D/README.md)|[NeonShooter](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/NeonShooter/README.md)|
-|-|-|
-|Supported on all platforms|Supported on all platforms|
-|[![Platformer 2D Sample](https://raw.githubusercontent.com/MonoGame/MonoGame.Samples/refs/heads/3.8.2/Images/Platformer2D-Sample.png)](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/Platformer2D/README.md)|[![NeonShooter Sample](https://raw.githubusercontent.com/MonoGame/MonoGame.Samples/refs/heads/3.8.2/Images/NeonShooter-Sample.png)](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/NeonShooter/README.md)|
-|The [Platformer 2D](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/Platformer2D/README.md) sample is a basic 2D platformer pulled from the original XNA samples and upgraded for MonoGame.|[Neon Shooter](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/NeonShooter/README.md) Is a graphically intensive twin-stick shooter with particle effects and save data from Michael Hoffman|
-|||
-
-|[Auto Pong Sample](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/AutoPong/README.md)|[Ship Game 3D](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/ShipGame/README.md)|
-|-|-|
-|Supported on all platforms|GL / DX / iOS / Android|
-|[![Auto Pong Sample](https://raw.githubusercontent.com/MonoGame/MonoGame.Samples/refs/heads/3.8.2/Images/AutoPong_1.gif)](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/AutoPong/README.md)|[![ShipGame 3D Sample](https://raw.githubusercontent.com/MonoGame/MonoGame.Samples/refs/heads/3.8.2/Images/ShipGame.png)](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/ShipGame/README.md)|
-|A short [sample project](https://github.com/MonoGame/MonoGame.Samples/blob/3.8.2/AutoPong/README.md) showing you how to make the classic game of pong, with generated soundfx, in 300 lines of code.|3D Ship Game (Descent clone) sample, pulled from the XNA archives and updated for MonoGame|
-|||
-
-## Support and Contributions
-
-If you think you have found a bug or have a feature request, use our [issue tracker](https://github.com/MonoGame/MonoGame/issues). Before opening a new issue, please search to see if your problem has already been reported. Try to be as detailed as possible in your issue reports.
-
-If you need help using MonoGame or have other questions we suggest you post on [GitHub discussions](https://github.com/MonoGame/MonoGame/discussions) page or [Discord server](https://discord.gg/monogame). Please do not use the issue tracker for personal support requests.
-
-If you are interested in contributing fixes or features to MonoGame, please read our [contributors guide](CONTRIBUTING.md) first.
-
-### Subscription
-
-If you would like to help the project by supporting us financially, consider supporting us via a subscription for the price of a monthly coffee.
-
-Money goes towards hosting, new hardware and if enough people subscribe a dedicated developer.
-
-There are several options on our [Donation Page](https://monogame.net/donate/).
-
-## Source Code
+## Source code layout
 
 > [!NOTE]
-> For the prerequisites to build from source, please refer to the [Requirements](REQUIREMENTS.md) file.
+> For build prerequisites, see [REQUIREMENTS.md](REQUIREMENTS.md).
 
-The full source code is available here from GitHub:
-
-* Clone the source: `git clone --recurse-submodules https://github.com/MonoGame/MonoGame.git` (including resursive submodules).
-* Set up the submodules: `git submodule update --init`
-* Open the solution for your target platform to build the game framework.
-* Open the Tools solution for your development platform to build the pipeline and content tools.
-
-A high level breakdown of the components of the framework:
-
-* The game framework is found in [MonoGame.Framework](MonoGame.Framework).
-* The content pipeline is located in [MonoGame.Framework.Content.Pipeline](MonoGame.Framework.Content.Pipeline).
-* Project templates are in [Templates](Templates).
-* See [Tests](Tests) for the framework unit tests.
-* See [Tools/Tests](Tools/MonoGame.Tools.Tests) for the content pipeline and other tool tests.
-* The [mgcb](Tools/MonoGame.Content.Builder) is a command line tool for content processing.
-* The [mgfxc](Tools/MonoGame.Effect.Compiler) is a command line effect compiler tool.
-* The [mgcb-editor](Tools/MonoGame.Content.Builder.Editor) tool is a GUI frontend for content processing.
-* (Preview) The [Content Builder Project](MonoGame.Framework.Content.Pipeline/Builder/) is a new console app framework for content processing.
-
-## Helpful Links
-
-* The official website is [monogame.net](http://www.monogame.net).
-* Our [issue tracker](https://github.com/MonoGame/MonoGame/issues) is on GitHub.
-* You can [join the Discord server](https://discord.gg/monogame) and chat live with the core developers and other users.
-* The [official documentation](https://docs.monogame.net/articles/index.html) is on our website.
-* Download [release](https://github.com/MonoGame/MonoGame/releases) and [development](https://github.com/orgs/MonoGame/packages) packages.
-* Release and Preview releases are also available on [NuGet.Org](https://www.nuget.org/packages?q=monogame.framework&includeComputedFrameworks=true&prerel=true&sortby=relevance).
-* Follow [@MonoGameTeam](https://twitter.com/monogameteam) on Twitter/X, [BlueSky](https://bsky.app/profile/monogame.net) and [Mastodon](https://mastodon.cloud/@MonoGame).
-* Get premium content on [Patreon](https://www.patreon.com/bePatron?u=3142012).
+* The game framework is in [MonoGame.Framework](MonoGame.Framework).
+* The native runtime (MGP / MGG / MGA) is in [native/monogame](native/monogame).
+* The browser target is in [native/browser](native/browser).
+* The content pipeline is in [MonoGame.Framework.Content.Pipeline](MonoGame.Framework.Content.Pipeline).
+* Project templates are in [Templates](Templates); framework tests in [Tests](Tests).
+* [mgcb](Tools/MonoGame.Content.Builder) is the content processing CLI, [mgfxc](Tools/MonoGame.Effect.Compiler) the effect compiler, and [mgcb-editor](Tools/MonoGame.Content.Builder.Editor) the GUI frontend.
 
 ## License
 
-The MonoGame project is under the [Microsoft Public License](https://opensource.org/licenses/MS-PL) except for a few portions of the code. See the [LICENSE.txt](LICENSE.txt) file for more details. Third-party libraries used by MonoGame are under their own licenses. Please refer to those libraries for details on the license they use.
+The MonoGame project is under the [Microsoft Public License](https://opensource.org/licenses/MS-PL)
+except for a few portions of the code. See the [LICENSE.txt](LICENSE.txt) file for more details.
+Third-party libraries used by MonoGame are under their own licenses. Please refer to those libraries
+for details on the license they use.

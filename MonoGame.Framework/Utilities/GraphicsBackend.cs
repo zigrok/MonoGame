@@ -37,6 +37,14 @@ namespace MonoGame.Framework.Utilities
         /// <summary>
         /// Represents the native browser WebGL2 backend using BrowserGL effect bytecode.
         /// </summary>
-        WebGL = 5
+        WebGL = 5,
+
+        /// <summary>
+        /// Represents the headless backend, which accepts the full graphics API without a GPU, a
+        /// driver, or a display server. Draw calls are discarded and nothing is rasterized, so it is
+        /// intended for automated tests and other runs where the draw path should execute but its
+        /// output is not inspected.
+        /// </summary>
+        Headless = 6
     }
 }

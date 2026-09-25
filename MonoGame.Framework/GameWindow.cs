@@ -56,6 +56,41 @@ namespace Microsoft.Xna.Framework
 		public abstract IntPtr Handle { get; }
 
 	    /// <summary>
+	    /// The operating system's own window object, as opposed to the windowing backend's:
+	    /// <c>NSWindow*</c> on macOS, <c>HWND</c> on Windows, the X11 window id on Linux.
+	    /// <para>
+	    /// <see cref="Handle"/> is whatever the backend uses - an <c>SDL_Window*</c> under SDL - so
+	    /// it is the wrong thing to hand to an OS API. This is what a platform integration that
+	    /// talks to the operating system rather than to the backend needs: an accessibility
+	    /// adapter, a native menu, an IME panel.
+	    /// </para>
+	    /// <para>
+	    /// <see cref="IntPtr.Zero"/> when the backend does not expose one or there is no real
+	    /// window, which is the normal answer under a headless runtime or a dummy video driver.
+	    /// Callers must handle that rather than assume a window exists.
+	    /// </para>
+	    /// </summary>
+		public virtual IntPtr PlatformHandle => IntPtr.Zero;
+
+	    /// <summary>
+	    /// Whether the window is on screen.
+	    /// <para>
+	    /// <see cref="Game.Run()"/> shows the window itself, so a normal game never sets this. It
+	    /// exists for a host that drives the loop with <see cref="Game.RunOneFrame"/> or
+	    /// <see cref="Game.Tick"/> instead: those never enter the run loop, so without this the
+	    /// window stays hidden for the life of the process and the game appears not to start.
+	    /// </para>
+	    /// <para>
+	    /// Backends that cannot hide or show a window report true and ignore writes.
+	    /// </para>
+	    /// </summary>
+		public virtual bool IsVisible
+		{
+			get { return true; }
+			set { }
+		}
+
+	    /// <summary>
 	    /// The name of the screen the window is currently on.
 	    /// </summary>
 		public abstract string ScreenDeviceName { get; }

@@ -323,6 +323,9 @@ internal static unsafe partial class MGP
     [DllImport(MonoGameNativeDLL, EntryPoint = "MGP_Window_GetNativeHandle", ExactSpelling = true)]
     public static extern nint Window_GetNativeHandle(MGP_Window* window);
 
+    [DllImport(MonoGameNativeDLL, EntryPoint = "MGP_Window_GetPlatformHandle", ExactSpelling = true)]
+    public static extern nint Window_GetPlatformHandle(MGP_Window* window);
+
     [DllImport(MonoGameNativeDLL, EntryPoint = "MGP_Window_GetSdlFlags", ExactSpelling = true)]
     public static extern ulong Window_GetSdlFlags(MGP_Window* window);
 

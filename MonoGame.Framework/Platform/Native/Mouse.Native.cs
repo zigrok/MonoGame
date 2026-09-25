@@ -13,7 +13,12 @@ public static partial class Mouse
     {
         // TODO: Multiple window support.
 
-        return PrimaryWindow.Handle;
+        // Zero rather than a throw when there is no window. GetState() already null-checks
+        // PrimaryWindow; this did not, so asking for the handle after the last window closed threw
+        // a NullReferenceException instead of answering "none". Callers already treat Zero as "no
+        // window to route input to", and a host that tears one Game down while another is still
+        // running -- a test suite, a tool that reopens its window -- has nothing else to ask.
+        return PrimaryWindow?.Handle ?? IntPtr.Zero;
     }
 
     private static void PlatformSetWindowHandle(IntPtr windowHandle)
@@ -30,6 +35,8 @@ public static partial class Mouse
     private static unsafe void PlatformSetPosition(int x, int y)
     {
         // TODO: Multiple window support.
+
+        if (PrimaryWindow == null) return;
 
         PrimaryWindow.MouseState.X = x;
         PrimaryWindow.MouseState.Y = y;
