@@ -108,7 +108,19 @@ internal sealed class HotReloadServiceTests
 
     private sealed class TemporaryFile : IDisposable
     {
-        public string Path { get; } = System.IO.Path.GetTempFileName();
-        public void Dispose() => File.Delete(Path);
+        // A directory of its own, not the shared temp directory: the service watches this path, and
+        // anything else writing in the same directory can raise an event that starts a third
+        // compile and makes "exactly two invocations" fail on a busy runner.
+        private readonly string _directory = Directory.CreateTempSubdirectory("monogame-hot-reload-").FullName;
+
+        public string Path { get; }
+
+        public TemporaryFile()
+        {
+            Path = System.IO.Path.Combine(_directory, "watched.fx");
+            File.WriteAllText(Path, string.Empty);
+        }
+
+        public void Dispose() => Directory.Delete(_directory, recursive: true);
     }
 }
