@@ -19,6 +19,7 @@ public partial class GraphicsDevice
     internal Texture2D DefaultTexture;
 
     private int _currentFrame = -1;
+    private bool _hasPresentedFrame;
 
     private readonly Dictionary<int, DynamicVertexBuffer> _userVertexBuffers = new Dictionary<int, DynamicVertexBuffer>();
     private DynamicIndexBuffer _userIndexBuffer16;
@@ -83,11 +84,18 @@ public partial class GraphicsDevice
         PresentationParameters.MultiSampleCount =
                 GetClampedMultisampleCount(PresentationParameters.BackBufferFormat, PresentationParameters.MultiSampleCount);
 
-        // Finish any frame that is currently rendering.
+        // Finish any frame that is currently rendering. Device initialization binds the
+        // discard-backed backbuffer before the game has drawn; an ApplyChanges during
+        // Game.Initialize must not expose that bootstrap clear as the first window frame.
         if (_currentFrame > -1)
         {
-            var syncInterval = PresentationParameters.PresentationInterval.GetSyncInterval();
-            MGG.GraphicsDevice_Present(Handle, _currentFrame, syncInterval);
+            if (_hasPresentedFrame)
+            {
+                var syncInterval = PresentationParameters.PresentationInterval.GetSyncInterval();
+                MGG.GraphicsDevice_Present(Handle, _currentFrame, syncInterval);
+            }
+
+            _currentFrame = -1;
         }
 
         // Now resize the back buffer.
@@ -218,6 +226,7 @@ public partial class GraphicsDevice
         var syncInterval = PresentationParameters.PresentationInterval.GetSyncInterval();
         MGG.GraphicsDevice_Present(Handle, _currentFrame, syncInterval);
         _currentFrame = -1;
+        _hasPresentedFrame = true;
     }
 
     private unsafe void PlatformSetViewport(ref Viewport viewport)
