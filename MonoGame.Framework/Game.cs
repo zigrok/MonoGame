@@ -458,6 +458,68 @@ namespace Microsoft.Xna.Framework
 
         }
 
+        private bool _stepStarted;
+
+        /// <summary>
+        /// Deterministically advance the game by exactly one frame: one <see cref="Update"/>
+        /// and one <see cref="Draw"/> (through BeginDraw/EndDraw/Present) with a synthetic
+        /// <see cref="GameTime"/>. Never sleeps, never reads the wall clock and never catches up.
+        /// Initializes the game on first use.
+        /// </summary>
+        /// <param name="elapsed">
+        /// The elapsed time of the step; defaults to <see cref="TargetElapsedTime"/>.
+        /// </param>
+    #if ANDROID
+        [RequiresUnreferencedCode("Android graphics context recovery reloads assets by reflecting over runtime asset types.")]
+        [RequiresDynamicCode("Android graphics context recovery reloads assets by reflecting over runtime asset types.")]
+    #endif
+        public void StepFrame(TimeSpan? elapsed = null)
+        {
+            AssertNotDisposed();
+            if (Platform == null)
+                return;
+
+            if (!_stepStarted)
+            {
+                if (!Platform.BeforeRun())
+                    return;
+
+                if (!_initialized)
+                {
+                    DoInitialize();
+                    _initialized = true;
+                }
+
+                BeginRun();
+                _stepStarted = true;
+            }
+
+            var step = elapsed ?? TargetElapsedTime;
+            _gameTime.ElapsedGameTime = step;
+            _gameTime.TotalGameTime += step;
+
+            DoUpdate(_gameTime);
+
+            if (_suppressDraw)
+                _suppressDraw = false;
+            else
+                DoDraw(_gameTime);
+
+            if (_shouldExit)
+            {
+                var exitingEventArgs = new ExitingEventArgs();
+                OnExiting(this, exitingEventArgs);
+                if (!exitingEventArgs.Cancel)
+                {
+                    UnloadContent();
+                    Platform.Exit();
+                    EndRun();
+                    _stepStarted = false;
+                }
+                _shouldExit = false;
+            }
+        }
+
         /// <summary>
         /// Run the game using the default <see cref="GameRunBehavior"/> for the current platform.
         /// </summary>

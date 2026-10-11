@@ -44,17 +44,49 @@ behaves identically to a real desktop backend.
 ## Building
 
 No Vulkan SDK and no Xcode Metal toolchain are required — that is the point, since the machines this
-targets have neither:
+targets have neither. The static SDL3 and FAudio dependencies are shared with the other native
+targets; build them first if `external/` is empty (see the Metal instructions in [README.md](README.md)).
+
+### macOS
 
 ```sh
 cd native/monogame
-premake5 --arch=arm64 --headless-only gmake
-make config=release desktopheadless
+premake5 --arch=arm64 --headless-only gmake && make config=release desktopheadless
 ```
 
 `--headless-only` generates just this target, skipping the projects that need the Vulkan SDK or
-Xcode. The static SDL3 and FAudio dependencies are shared with the other native targets; build them
-first if `external/` is empty (see the Metal instructions in [README.md](README.md)).
+Xcode.
+
+### Linux
+
+- SDL3 must be built with CMake as a **static** library with `-DSDL_UNIX_CONSOLE_BUILD=ON`, so it
+  does not require X11/Wayland development packages.
+- FAudio must be built and available to the link step.
+- Generate the effect headers the runtime needs:
+  `dotnet run --project build/Build.csproj -- --target="Build Vulkan Shaders"`.
+- Then generate and build with premake as on macOS (`--headless-only gmake`,
+  `make config=release desktopheadless`).
+
+### Environment
+
+`SDL_VIDEODRIVER=dummy` and `SDL_AUDIODRIVER=dummy` must be in the **process environment before the
+host starts** (shell `export`, CI `env:`, or the test runner's launch environment).
+`Environment.SetEnvironmentVariable` does not reach native SDL on Unix, so setting them from managed
+code at startup has no effect.
+
+## Deterministic frame stepping
+
+```csharp
+public void StepFrame(TimeSpan? elapsed = null)
+```
+
+Runs exactly one `Update` and one `Draw` (through `BeginDraw`/`EndDraw`/`Present`) with a synthetic
+`GameTime`: `ElapsedGameTime` is `elapsed ?? TargetElapsedTime` and `TotalGameTime` advances by
+exactly that. It never sleeps, never reads the wall clock and never performs catch-up updates, no
+matter how large `elapsed` is. The first call initializes the game like `RunOneFrame` does
+(`Platform.BeforeRun`, `Initialize`, `BeginRun`). `Exit()` is honored at the end of the step.
+Existing drivers (`Run`, `Tick`, `RunOneFrame`) are unchanged. Use it to drive a headless game from
+tests; do not mix it with `Run()` on the same instance.
 
 ## How it works
 
