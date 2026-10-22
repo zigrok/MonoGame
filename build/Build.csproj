@@ -37,6 +37,9 @@
     <PackageReference Include="MonoGame.Tool.Dxc" Version="1.8.2505.11" />
     <PackageReference Include="NuGet.Packaging" Version="7.3.1" />
     <PackageReference Include="NuGet.Protocol" Version="7.3.1" />
+    <!-- Pinned: NuGet 7.3.1 pulls System.Security.Cryptography.Pkcs 10.0.3, which the NuGet audit reports as vulnerable (NU1902/NU1903)
+         and this repository treats warnings as errors. 10.0.13 is the patched 10.0.x release. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.13" />
   </ItemGroup>
 
   <Target Name="ExcludeCakeGitNativeLibraryFromManagedReferences" BeforeTargets="ResolveAssemblyReferences">
