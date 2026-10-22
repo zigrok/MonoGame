@@ -19,7 +19,7 @@ namespace MonoGame.Framework;
 /// wants to step the game, assert, and step again.
 /// </para>
 /// <para>
-/// <see cref="Game.Tick"/> on its own is not enough. The window system is serviced inside the run
+/// <see cref="Game.Tick()"/> on its own is not enough. The window system is serviced inside the run
 /// loop, so a host that only calls Tick gets a window the OS never maps: present in the window
 /// server at zero size, showing nothing. <see cref="Tick"/> here does the whole iteration.
 /// </para>

@@ -490,6 +490,7 @@ public partial class GraphicsDevice
         MGG.GraphicsDevice_DrawIndexed(Handle, primitiveType, primitiveCount, startIndex, baseVertex);
     }
 
+    /// <summary>Prepares the pipeline for the given primitive type ahead of time and reports whether it is ready.</summary>
     public unsafe bool PrewarmCurrentPipeline(PrimitiveType primitiveType)
     {
         ApplyState(true);

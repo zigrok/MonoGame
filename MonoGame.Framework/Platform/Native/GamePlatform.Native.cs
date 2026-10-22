@@ -211,7 +211,7 @@ class NativeGamePlatform : GamePlatform
     /// Runs one iteration of what <see cref="RunLoop"/> does, for a host that owns the loop itself.
     /// </summary>
     /// <remarks>
-    /// <see cref="Game.Tick"/> alone is not a frame. The window system is serviced by PollEvents,
+    /// <see cref="Game.Tick()"/> alone is not a frame. The window system is serviced by PollEvents,
     /// which only RunLoop calls, so a host that drives Tick directly gets a window that is never
     /// mapped, never resized and never told anything by the OS -- it exists in the window server at
     /// zero size and nothing is ever drawn where a person can see it.
