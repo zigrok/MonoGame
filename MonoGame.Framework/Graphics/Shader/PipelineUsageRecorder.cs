@@ -9,24 +9,40 @@ using System.Threading;
 
 namespace Microsoft.Xna.Framework.Graphics;
 
+/// <summary>The description of one shader pipeline: the artifacts it needs and the state it is built with.</summary>
 public sealed class PipelineUsageDescription
 {
+    /// <summary>The schema version of a pipeline description.</summary>
     public const int CurrentSchemaVersion = 1;
 
+    /// <summary>The schema version of this description.</summary>
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+    /// <summary>The shader artifacts of the pipeline, by name.</summary>
     public IReadOnlyDictionary<string, string> ShaderArtifacts { get; set; } = new Dictionary<string, string>();
+    /// <summary>The vertex layout the pipeline expects.</summary>
     public string VertexLayout { get; set; }
+    /// <summary>The primitive topology the pipeline expects.</summary>
     public string PrimitiveTopology { get; set; }
+    /// <summary>The blend state the pipeline expects.</summary>
     public string BlendState { get; set; }
+    /// <summary>The depth and stencil state the pipeline expects.</summary>
     public string DepthStencilState { get; set; }
+    /// <summary>The rasterizer state the pipeline expects.</summary>
     public string RasterizerState { get; set; }
+    /// <summary>The render target formats the pipeline expects.</summary>
     public string RenderTargetFormats { get; set; }
+    /// <summary>The depth and stencil format the pipeline expects.</summary>
     public string DepthStencilFormat { get; set; }
+    /// <summary>The number of samples the pipeline expects.</summary>
     public int SampleCount { get; set; } = 1;
+    /// <summary>The sample mask the pipeline expects.</summary>
     public uint SampleMask { get; set; } = uint.MaxValue;
+    /// <summary>The specialization constants the pipeline expects.</summary>
     public string SpecializationConstants { get; set; } = string.Empty;
+    /// <summary>The backend compatibility flags the pipeline expects.</summary>
     public string BackendCompatibilityFlags { get; set; } = string.Empty;
 
+    /// <summary>A key that identifies this description and its state.</summary>
     public string ComputeKey()
     {
         using (var stream = new MemoryStream())
@@ -66,45 +82,67 @@ public sealed class PipelineUsageDescription
     }
 }
 
+/// <summary>One pipeline in a usage manifest.</summary>
 public sealed class PipelineUsageManifestEntry
 {
+    /// <summary>The key of the pipeline.</summary>
     public string PipelineKey { get; set; }
+    /// <summary>The priority of the pipeline: the lower the value, the earlier it is prepared.</summary>
     public int Priority { get; set; }
+    /// <summary>Where the pipeline was declared.</summary>
     public string Source { get; set; }
+    /// <summary>The group the pipeline priority belongs to.</summary>
     public string PriorityGroup { get; set; } = "Default";
 }
 
+/// <summary>The recorded pipeline usage of a device: the pipelines and their descriptions.</summary>
 public sealed class PipelineUsageManifest
 {
+    /// <summary>The schema version of this manifest.</summary>
     public int SchemaVersion { get; set; } = 2;
+    /// <summary>The pipelines of the manifest.</summary>
     public IReadOnlyList<PipelineUsageManifestEntry> Pipelines { get; set; } = Array.Empty<PipelineUsageManifestEntry>();
+    /// <summary>The descriptions of the manifest, by pipeline key.</summary>
     public IReadOnlyDictionary<string, PipelineUsageDescription> Descriptions { get; set; }
         = new Dictionary<string, PipelineUsageDescription>();
 }
 
+/// <summary>The progress of a pipeline prewarm run.</summary>
 public class PipelinePrewarmProgress
 {
+    /// <summary>The number of pipelines that were processed.</summary>
     public int Completed { get; set; }
+    /// <summary>The number of pipelines to process.</summary>
     public int Total { get; set; }
+    /// <summary>The number of pipelines that were prepared.</summary>
     public int Prepared { get; set; }
+    /// <summary>The number of pipelines that were already cached.</summary>
     public int CacheHits { get; set; }
+    /// <summary>The number of pipelines whose description could not be resolved.</summary>
     public int Unresolved { get; set; }
+    /// <summary>The number of pipelines that failed to prepare.</summary>
     public int Failed { get; set; }
+    /// <summary>The key of the pipeline.</summary>
     public string PipelineKey { get; set; }
+    /// <summary>How long the run took.</summary>
     public TimeSpan Elapsed { get; set; }
 }
 
+/// <summary>The result of a pipeline prewarm run.</summary>
 public sealed class PipelinePrewarmReport : PipelinePrewarmProgress
 {
+    /// <summary>Whether the run was cancelled.</summary>
     public bool Cancelled { get; set; }
 }
 
+/// <summary>Records which shader pipelines a device uses.</summary>
 public sealed class PipelineUsageRecorder
 {
     private readonly object _sync = new object();
     private readonly Dictionary<(string Key, string Group), PipelineUsageManifestEntry> _entries = new();
     private readonly Dictionary<string, PipelineUsageDescription> _descriptions = new(StringComparer.Ordinal);
 
+    /// <summary>Declares a pipeline description with its priority.</summary>
     public void Declare(PipelineUsageDescription description, int priority, string priorityGroup = "Default", string source = "Declared")
     {
         if (description == null)
@@ -117,6 +155,7 @@ public sealed class PipelineUsageRecorder
     internal void Observe(PipelineUsageDescription description)
         => Record(description, 0, "Recorded", "Development");
 
+    /// <summary>The usage recorded so far.</summary>
     public PipelineUsageManifest Snapshot()
     {
         lock (_sync)
@@ -163,6 +202,7 @@ public partial class GraphicsDevice
 {
     private PipelineUsageRecorder _pipelineUsageRecorder;
 
+    /// <summary>Starts recording the pipeline usage of the device.</summary>
     public PipelineUsageRecorder BeginPipelineUsageRecording()
     {
         if (_pipelineUsageRecorder != null)
@@ -171,6 +211,7 @@ public partial class GraphicsDevice
         return _pipelineUsageRecorder;
     }
 
+    /// <summary>Stops recording and returns the recorded usage.</summary>
     public PipelineUsageManifest EndPipelineUsageRecording()
     {
         if (_pipelineUsageRecorder == null)
@@ -181,6 +222,7 @@ public partial class GraphicsDevice
     }
 
 #if NATIVE
+    /// <summary>Prepares the pipelines of the device ahead of time.</summary>
     public PipelinePrewarmReport PrewarmPipelines(
         PipelineUsageManifest manifest,
         Func<PipelineUsageDescription, bool> resolve,
@@ -262,6 +304,7 @@ public partial class GraphicsDevice
         _pipelineUsageRecorder.Observe(CaptureCurrentPipelineDescription(primitiveType));
     }
 
+    /// <summary>The description of the pipeline the device uses for the given primitive type.</summary>
     public PipelineUsageDescription GetCurrentPipelineDescription(PrimitiveType primitiveType)
     {
         ApplyState(true);

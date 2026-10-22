@@ -77,7 +77,7 @@ namespace Microsoft.Xna.Framework
 	    /// <para>
 	    /// <see cref="Game.Run()"/> shows the window itself, so a normal game never sets this. It
 	    /// exists for a host that drives the loop with <see cref="Game.RunOneFrame"/> or
-	    /// <see cref="Game.Tick"/> instead: those never enter the run loop, so without this the
+	    /// <see cref="Game.Tick()"/> instead: those never enter the run loop, so without this the
 	    /// window stays hidden for the life of the process and the game appears not to start.
 	    /// </para>
 	    /// <para>
