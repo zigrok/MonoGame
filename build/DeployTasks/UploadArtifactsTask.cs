@@ -59,6 +59,17 @@ public sealed class UploadArtifactsTask : AsyncFrostingTask<BuildContext>
             DeleteToolStore(context, path);
         }
 
+        // Cake's GitHub Actions client hardcodes `new HttpClient()`, so its 100 second default timeout cannot be raised
+        // through the HTTPCLIENT_TIMEOUT override used by the rest of this task. The macOS zips exceed it from a home
+        // uplink, so under the local runners the workflow uploads the test folders with actions/upload-artifact instead;
+        // only the cleanup above matters here. Packaging and Deploy are skipped in that setup, so the other artifacts
+        // (native libraries, framework, NuGets) have no consumer.
+        if (context.EnvironmentVariable("TRACE_CI_RUNNERS") == "self-hosted")
+        {
+            context.Information("TRACE_CI_RUNNERS=self-hosted: the workflow uploads the test artifacts with actions/upload-artifact.");
+            return;
+        }
+
         // Upload mgpipeline and mgruntime native libraries
         switch (context.Environment.Platform.Family)
         {

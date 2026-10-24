@@ -12,29 +12,21 @@ env:
   
 jobs:
   build:
-    name: build-${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: build-${{ matrix.platform }}
+    # TRACE_CI_RUNNERS picks GitHub-hosted runners (unset) or the local fleet (`self-hosted`); see
+    # docs/self-hosted-runners.md in Trace Arena. Under the flag only the legs the local fleet can host exist:
+    # there is no Windows machine, and the arm64 Linux pool is a 1.5 GB container that cannot build the native
+    # runtime. Hosted CI keeps all four legs.
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && (matrix.platform == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]')) || (matrix.platform == 'windows' && 'windows-latest' || matrix.platform == 'macos' && 'macos-latest' || matrix.platform == 'linux-arm' && 'ubuntu-24.04-arm' || 'ubuntu-latest') }}
     env:
       MONOGAME_WINDOWS_PLATFORM_TOOLSET: ${{ matrix.platform == 'windows' && 'v145' || '' }}
     strategy:
       matrix:
-        include:
-          - os: windows-latest
-            platform: windows
-            shell: pwsh
-          - os: macos-latest
-            platform: macos
-            shell: bash
-          - os: ubuntu-latest
-            platform: linux
-            shell: bash
-          - os: ubuntu-24.04-arm
-            platform: linux-arm
-            shell: bash
+        platform: ${{ fromJSON(vars.TRACE_CI_RUNNERS == 'self-hosted' && '["macos","linux"]' || '["windows","macos","linux","linux-arm"]') }}
       fail-fast: false
     defaults:
       run:
-        shell: ${{ matrix.shell }}
+        shell: ${{ matrix.platform == 'windows' && 'pwsh' || 'bash' }}
     steps:
       - name: Free disk space
         if: runner.environment == 'github-hosted' && runner.os == 'Linux'
@@ -70,7 +62,9 @@ jobs:
           java-version: '17'
 
       - name: Setup Android SDK dependencies
-        if: runner.os != 'Windows' && runner.arch != 'ARM64'
+        # The Android/iOS builds are skipped when the workload is absent (BuildAndroidTask/BuildiOSTask.ShouldRun),
+        # which is the case on the local runners; the SDK bootstrap only makes sense on the hosted images.
+        if: runner.environment == 'github-hosted' && runner.os != 'Windows' && runner.arch != 'ARM64'
         run: |
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           "$sdkmanager" \
@@ -86,7 +80,7 @@ jobs:
         shell: bash
 
       - name: Setup Android SDK dependencies
-        if: runner.os == 'Windows'
+        if: runner.environment == 'github-hosted' && runner.os == 'Windows'
         run: |
           $sdkManager = Join-Path $env:ANDROID_HOME "cmdline-tools/latest/bin/sdkmanager.bat"
           $packages = @(
@@ -117,7 +111,9 @@ jobs:
           brew update
 
       - name: Setup DotNet on MacOS
-        if: runner.environment == 'github-hosted' && runner.os == 'macos'
+        # Also on the self-hosted Mac: MGCB Editor targets the `macos` workload, and the local SDK does not ship it
+        # (NETSDK1147). The SDK lives in ~/.dotnet, so after the first job the install is a fast no-op.
+        if: runner.os == 'macos'
         run: |
           dotnet workload install macos ios --version ${{ env.DotnetVersion }}
 
@@ -126,6 +122,14 @@ jobs:
         if: runner.environment == 'github-hosted' && runner.os == 'macos'
         with:
           xcode-version: '${{ env.XCodeVersion }}'
+
+      - name: Accept the Xcode installed on the host
+        # The 10.0.103 macOS workload recommends Xcode 26.2; the runner Mac has 27.1 and only that. The check compares
+        # major.minor, and MGCB Editor still bundles with the newer Xcode, so tell MSBuild the mismatch is intentional
+        # (ValidateXcodeVersion is the documented switch on the _ValidateXcodeVersion target). The pin above stays for
+        # the hosted legs, where 26.2 is available.
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'macOS'
+        run: echo "ValidateXcodeVersion=false" >> "$GITHUB_ENV"
 
       - name: Add msbuild to PATH
         if: runner.os == 'Windows'
@@ -146,6 +150,15 @@ jobs:
           ./Bootstrap.sh
           echo "${GITHUB_WORKSPACE}/premake-core/bin/release" >> "$GITHUB_PATH"
 
+      - name: Install Linux build prerequisites
+        # The hosted image has these; the local runner image is a plain .NET container. pkg-config is needed by the Vulkan
+        # SDK action (it builds the loader from source), wget/gnupg by the Wine action below (`sudo wget` for the WineHQ
+        # key and the mgfxc prefix script).
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config wget gnupg ca-certificates
+
       - name: Install Vulkan SDK
         uses: zigrok/setup-vulkan-sdk@45c0d9fd5d600244dfa293b3a8c008f5fdd8a0dd
         if: runner.os != 'macos'
@@ -155,17 +168,69 @@ jobs:
           vulkan-components: 'Vulkan-Headers, Vulkan-Loader'
 
       - name: Install Full Vulkan SDK
-        if: runner.os == 'macos'
+        if: runner.os == 'macos' && vars.TRACE_CI_RUNNERS != 'self-hosted'
         uses: zigrok/install-vulkan-sdk@52e46193a1752c2d315469bfb08c45f09d932f61
         with:
           version: 1.4.309.0
           cache: true
 
+      - name: Use the Vulkan SDK installed on the host
+        # The action runs the LunarG installer through sudo, and the self-hosted Mac has no passwordless sudo. The SDK is
+        # installed under ~/VulkanSDK instead (host prerequisite, docs/self-hosted-runners.md in Trace Arena).
+        if: runner.os == 'macos' && vars.TRACE_CI_RUNNERS == 'self-hosted'
+        run: |
+          sdk="${VULKAN_SDK:-$(ls -d "$HOME"/VulkanSDK/*/ | sort -V | tail -1)}"
+          sdk="${sdk%/}"
+          test -d "$sdk/include" && test -d "$sdk/lib"
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          echo "$sdk/bin" >> "$GITHUB_PATH"
+
       - name: Disable Annotations
         run: echo "::remove-matcher owner=csc::"
 
       - name: Setup Wine
+        # Under the flag both self-hosted legs install Wine themselves below: the macOS action runs `brew upgrade` and
+        # needs sudo, the Linux one runs `apt install` without -y, which aborts on a non-interactive runner.
+        if: vars.TRACE_CI_RUNNERS != 'self-hosted'
         uses: monogame/monogame-actions/install-wine@v1.0.3
+
+      - name: Install Wine on the self-hosted Linux runner
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
+        run: |
+          # Same WineHQ build the upstream action installs, but non-interactive and without the ~2.2 GB of recommends
+          # (fonts, gstreamer, systemd) that a headless compiler does not need.
+          sudo dpkg --add-architecture i386
+          sudo mkdir -pm755 /etc/apt/keyrings
+          sudo wget -q -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
+          sudo wget -q -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends winehq-stable p7zip-full curl
+          # WineHQ 11 ships the unified wow64 `wine` binary only; `wine64` is the pre-11 split layout and does not exist.
+          wine --version
+          wget -qO- https://monogame.net/downloads/net9_mgfxc_wine_setup.sh | bash
+          echo "$HOME/.winemonogame" >> "$GITHUB_PATH"
+          {
+            echo "WINEPREFIX=$HOME/.winemonogame"
+            echo "WINEARCH=win64"
+            echo "WINEDEBUG=-all"
+            echo "MVK_CONFIG_LOG_LEVEL=0"
+            echo "WINEDLLOVERRIDES=d3dcompiler_47=n,explorer.exe=e,services.exe=f"
+            echo "MGFXC_WINE_PATH=$HOME/.winemonogame"
+          } >> "$GITHUB_ENV"
+
+      - name: Use the Wine installed on the host
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'macOS'
+        run: |
+          for dir in /opt/homebrew/bin /usr/local/bin; do
+            if [ -x "$dir/wine" ]; then echo "$dir" >> "$GITHUB_PATH"; fi
+          done
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          command -v wine
+          command -v winepath
+          if [ ! -f "$HOME/.winemonogame/drive_c/windows/system32/dotnet.exe" ]; then
+            wget -qO- https://monogame.net/downloads/net9_mgfxc_wine_setup.sh | bash
+          fi
+          echo "WINEPREFIX=$HOME/.winemonogame" >> "$GITHUB_ENV"
 
       - name: Install Fonts
         uses: monogame/monogame-actions/install-fonts@v1
@@ -204,12 +269,11 @@ jobs:
       - name: Run Tools Tests
         if: runner.os != 'Linux' || runner.arch != 'ARM64'
         run: |
+          # $HOME, not the hosted runner's fixed home, so the same step works on the local macOS/Linux runners.
           if [ "$RUNNER_OS" == "Windows" ]; then
                 dotnet test Tools/MonoGame.Tools.Tests/MonoGame.Tools.Tests.csproj --blame-hang-timeout 5m -c Release
-          elif [ "$RUNNER_OS" == "Linux" ]; then
-                MGFXC_WINE_PATH=/home/runner/.winemonogame dotnet test Tools/MonoGame.Tools.Tests/MonoGame.Tools.Tests.csproj --blame-hang-timeout 5m -c Release --filter="TestCategory!=Audio"
           else
-                MGFXC_WINE_PATH=/Users/runner/.winemonogame dotnet test Tools/MonoGame.Tools.Tests/MonoGame.Tools.Tests.csproj --blame-hang-timeout 5m -c Release --filter="TestCategory!=Audio"
+                MGFXC_WINE_PATH="$HOME/.winemonogame" dotnet test Tools/MonoGame.Tools.Tests/MonoGame.Tools.Tests.csproj --blame-hang-timeout 5m -c Release --filter="TestCategory!=Audio"
           fi
         env:
           CI: true
@@ -245,11 +309,42 @@ jobs:
         env:
           ACTIONS_RUNTIME_TOKEN: ${{ env.ACTIONS_RUNTIME_TOKEN }}
           ACTIONS_RUNTIME_URL: "${{ env.ACTIONS_RUNTIME_URL }}"
+          TRACE_CI_RUNNERS: ${{ vars.TRACE_CI_RUNNERS }}
+
+      - name: Upload tests-desktopgl-${{ matrix.platform }}
+        # The self-hosted legs use the official action instead of Cake's uploader (100 s client timeout, too short for
+        # the macOS zips on a home uplink). Only the test folders are needed: packaging and Deploy are skipped under
+        # the flag. The name and root match what the tests job downloads.
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tests-desktopgl-${{ matrix.platform }}
+          path: Artifacts/Tests/DesktopGL/Release
+          if-no-files-found: error
+
+      - name: Upload tests-desktopvk-${{ matrix.platform }}
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tests-desktopvk-${{ matrix.platform }}
+          path: Artifacts/Tests/DesktopVK/Release
+          if-no-files-found: error
+
+      - name: Upload tests-desktopmetal-${{ matrix.platform }}
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && matrix.platform == 'macos'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tests-desktopmetal-${{ matrix.platform }}
+          path: Artifacts/Tests/DesktopMetal/Release
+          if-no-files-found: error
 
   pack-native-runtime:
     name: PackNativeRuntime
     needs: [ build ]
-    runs-on: ubuntu-latest
+    # Packs the runtime NuGets from the native binaries of *all* build legs, including the Windows ones. Under
+    # TRACE_CI_RUNNERS=self-hosted the Windows leg does not exist, so packaging is skipped; hosted CI still packs.
+    if: vars.TRACE_CI_RUNNERS != 'self-hosted'
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]') || 'ubuntu-latest' }}
     permissions:
         packages: write
         contents: write
@@ -281,7 +376,8 @@ jobs:
   package-binaries:
     name: PackageBinaries
     needs: [ build, pack-native-runtime, tests ]
-    runs-on: ubuntu-latest
+    if: vars.TRACE_CI_RUNNERS != 'self-hosted'
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]') || 'ubuntu-latest' }}
     permissions:
         packages: write
         contents: write
@@ -312,8 +408,10 @@ jobs:
   deploy:
     name: Deploy
     needs: [ build, pack-native-runtime, tests ]
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' }}
+    # `needs` already holds the release path back when pack-native-runtime is skipped; the explicit condition keeps the
+    # intent readable (the fork never publishes from the local fleet).
+    if: ${{ github.event_name == 'push' && vars.TRACE_CI_RUNNERS != 'self-hosted' }}
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]') || 'ubuntu-latest' }}
     permissions:
         packages: write
         contents: write
@@ -355,7 +453,7 @@ jobs:
             token: ${{ secrets.GITHUB_TOKEN }}
 
   choose-runner:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && fromJSON('["self-hosted","Linux","X64"]') || 'ubuntu-latest' }}
     outputs:
       runner: ${{ steps.runner.outputs.runner }}
 
@@ -369,30 +467,21 @@ jobs:
         fi
 
   tests:
-    name: tests-${{ matrix.os }}
-    needs: [ build, pack-native-runtime, choose-runner ]
-    runs-on: ${{ matrix.os }}
+    name: tests-${{ matrix.platform }}
+    # pack-native-runtime is not a dependency: the tests only consume the test artifacts the build leg uploads.
+    # Keeping it in `needs` would skip the tests under TRACE_CI_RUNNERS=self-hosted, where packaging is skipped.
+    needs: [ build, choose-runner ]
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && (matrix.platform == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]')) || (matrix.platform == 'windows' && format('windows{0}latest', needs.choose-runner.outputs.runner) || matrix.platform == 'macos' && format('macos{0}latest', needs.choose-runner.outputs.runner) || matrix.platform == 'linux-arm' && 'ubuntu-24.04-arm' || 'ubuntu-latest') }}
+    env:
+      # The Framework pass skips Audio on Linux because the audio suite runs in its own step there.
+      MATRIX_FILTER: ${{ matrix.platform == 'linux' && '--where="Category != Audio"' || '' }}
     strategy:
       matrix:
-        include:
-          - os: windows${{ needs.choose-runner.outputs.runner }}latest
-            platform: windows
-            shell: pwsh
-          - os: macos${{ needs.choose-runner.outputs.runner }}latest
-            platform: macos
-            shell: bash
-          - os: ubuntu-latest
-            platform: linux
-            shell: bash
-            filter: --where="Category != Audio"
-          - os: ubuntu-24.04-arm
-            platform: linux
-            shell: bash
-            filter: --where="Category != Audio"
+        platform: ${{ fromJSON(vars.TRACE_CI_RUNNERS == 'self-hosted' && '["macos","linux"]' || '["windows","macos","linux","linux-arm"]') }}
       fail-fast: false
     defaults:
       run:
-        shell: ${{ matrix.shell }}
+        shell: ${{ matrix.platform == 'windows' && 'pwsh' || 'bash' }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v7
@@ -418,6 +507,39 @@ jobs:
         with:
           dotnet-version: '${{ env.DotnetVersion }}'
           global-json-file: "./global.json"
+
+      - name: Install Linux test dependencies
+        # The local runner image is a plain .NET container: it has none of the SDL/X11/GL/Vulkan runtime libraries or
+        # the virtual display the DesktopGL and Vulkan artifacts need. The hosted image already ships them.
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libgl1-mesa-dri libglx-mesa0 libegl1 libgles2 \
+            mesa-vulkan-drivers libvulkan1 \
+            xvfb xauth \
+            libasound2t64 libpulse0 libdbus-1-3 libudev1 pulseaudio \
+            libx11-6 libxext6 libxrandr2 libxcursor1 libxfixes3 libxi6 libxss1 libxtst6 \
+            libwayland-client0 libxkbcommon0 libdrm2 libgbm1
+
+      - name: Start the virtual display and the null audio sink
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 >/dev/null 2>&1 &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          # No GPU in the container: DesktopGL draws through Mesa llvmpipe and Vulkan through lavapipe.
+          echo "LIBGL_ALWAYS_SOFTWARE=1" >> "$GITHUB_ENV"
+          echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+          # No sound card either: a PulseAudio null sink gives SDL a real audio backend, so the Audio/Song suites run
+          # instead of failing to open a device (they are not skipped).
+          export XDG_RUNTIME_DIR="$HOME/.pulse-runtime"
+          mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+          pulseaudio --daemonize=yes --exit-idle-time=-1 --log-target=file:/tmp/pulseaudio.log
+          pactl load-module module-null-sink sink_name=trace-null sink_properties=device.description=TraceNull
+          pactl set-default-sink trace-null
+          pactl info
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+          echo "PULSE_SERVER=unix:$XDG_RUNTIME_DIR/pulse/native" >> "$GITHUB_ENV"
 
       - name: Install Linux Native smoke dependencies
         if: runner.environment == 'github-hosted' && matrix.platform == 'linux' && runner.arch == 'X64'
@@ -449,7 +571,6 @@ jobs:
         uses: monogame/monogame-actions/install-wine@v1.0.3
 
       - name: Install Fonts
-        if: runner.environment == 'github-hosted'
         uses: monogame/monogame-actions/install-fonts@v1
 
       - name: Pin xcode version
@@ -457,6 +578,12 @@ jobs:
         if: runner.environment == 'github-hosted' && runner.os == 'macos'
         with:
           xcode-version: '${{ env.XCodeVersion }}'
+
+      - name: Accept the Xcode installed on the host
+        # Same as in the build job: the template tests build the iOS app with the host's Xcode 27.1, while the 10.0.103
+        # macOS workload recommends 26.2.
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'macOS'
+        run: echo "ValidateXcodeVersion=false" >> "$GITHUB_ENV"
 
       - name: Download tests-desktopgl-${{ matrix.platform }}
         uses: actions/download-artifact@v8
@@ -602,7 +729,7 @@ jobs:
       # We have to run this is bits because the tests crash if too many are run in one go?
       - name: Run Framework Tests
         if: runner.environment != 'github-hosted' || runner.os != 'Windows' 
-        run: dotnet MonoGame.Tests.dll --timeout=300000 --test MonoGame.Tests.Framework ${{matrix.filter}}
+        run: dotnet MonoGame.Tests.dll --timeout=300000 --test MonoGame.Tests.Framework ${{ env.MATRIX_FILTER }}
         env:
           CI: true
         working-directory: tests-desktopgl
