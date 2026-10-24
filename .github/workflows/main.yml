@@ -205,7 +205,8 @@ jobs:
           sudo wget -q -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends winehq-stable p7zip-full curl
-          command -v wine64
+          # WineHQ 11 ships the unified wow64 `wine` binary only; `wine64` is the pre-11 split layout and does not exist.
+          wine --version
           wget -qO- https://monogame.net/downloads/net9_mgfxc_wine_setup.sh | bash
           echo "$HOME/.winemonogame" >> "$GITHUB_PATH"
           {
