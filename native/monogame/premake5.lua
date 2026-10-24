@@ -192,10 +192,8 @@ function vulkan()
     -- resolves against the default linker search paths first, so a MoltenVK dylib installed elsewhere on the machine
     -- (/usr/local/lib from a package manager) wins and leaves the runtime depending on @rpath/libMoltenVK.dylib instead
     -- of embedding MoltenVK. That makes the output depend on the build host and breaks any consumer without the dylib.
-    links {
-        path.join(vulkan_sdk, "lib/MoltenVK.xcframework/macos-arm64_x86_64/libMoltenVK.a"),
-        "IOSurface.framework", "Foundation.framework", "QuartzCore.framework", "AppKit.framework"
-    }
+    linkoptions {path.join(vulkan_sdk, "lib/MoltenVK.xcframework/macos-arm64_x86_64/libMoltenVK.a")}
+    links {"IOSurface.framework", "Foundation.framework", "QuartzCore.framework", "AppKit.framework"}
     filter {}
 end
 
