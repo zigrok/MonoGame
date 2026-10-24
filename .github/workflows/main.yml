@@ -12,29 +12,21 @@ env:
   
 jobs:
   build:
-    name: build-${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
+    name: build-${{ matrix.platform }}
+    # TRACE_CI_RUNNERS picks GitHub-hosted runners (unset) or the local fleet (`self-hosted`); see
+    # docs/self-hosted-runners.md in Trace Arena. Under the flag only the legs the local fleet can host exist:
+    # there is no Windows machine, and the arm64 Linux pool is a 1.5 GB container that cannot build the native
+    # runtime. Hosted CI keeps all four legs.
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && (matrix.platform == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]')) || (matrix.platform == 'windows' && 'windows-latest' || matrix.platform == 'macos' && 'macos-latest' || matrix.platform == 'linux-arm' && 'ubuntu-24.04-arm' || 'ubuntu-latest') }}
     env:
       MONOGAME_WINDOWS_PLATFORM_TOOLSET: ${{ matrix.platform == 'windows' && 'v145' || '' }}
     strategy:
       matrix:
-        include:
-          - os: windows-latest
-            platform: windows
-            shell: pwsh
-          - os: macos-latest
-            platform: macos
-            shell: bash
-          - os: ubuntu-latest
-            platform: linux
-            shell: bash
-          - os: ubuntu-24.04-arm
-            platform: linux-arm
-            shell: bash
+        platform: ${{ fromJSON(vars.TRACE_CI_RUNNERS == 'self-hosted' && '["macos","linux"]' || '["windows","macos","linux","linux-arm"]') }}
       fail-fast: false
     defaults:
       run:
-        shell: ${{ matrix.shell }}
+        shell: ${{ matrix.platform == 'windows' && 'pwsh' || 'bash' }}
     steps:
       - name: Free disk space
         if: runner.environment == 'github-hosted' && runner.os == 'Linux'
@@ -70,7 +62,9 @@ jobs:
           java-version: '17'
 
       - name: Setup Android SDK dependencies
-        if: runner.os != 'Windows' && runner.arch != 'ARM64'
+        # The Android/iOS builds are skipped when the workload is absent (BuildAndroidTask/BuildiOSTask.ShouldRun),
+        # which is the case on the local runners; the SDK bootstrap only makes sense on the hosted images.
+        if: runner.environment == 'github-hosted' && runner.os != 'Windows' && runner.arch != 'ARM64'
         run: |
           sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           "$sdkmanager" \
@@ -86,7 +80,7 @@ jobs:
         shell: bash
 
       - name: Setup Android SDK dependencies
-        if: runner.os == 'Windows'
+        if: runner.environment == 'github-hosted' && runner.os == 'Windows'
         run: |
           $sdkManager = Join-Path $env:ANDROID_HOME "cmdline-tools/latest/bin/sdkmanager.bat"
           $packages = @(
@@ -204,12 +198,11 @@ jobs:
       - name: Run Tools Tests
         if: runner.os != 'Linux' || runner.arch != 'ARM64'
         run: |
+          # $HOME, not the hosted runner's fixed home, so the same step works on the local macOS/Linux runners.
           if [ "$RUNNER_OS" == "Windows" ]; then
                 dotnet test Tools/MonoGame.Tools.Tests/MonoGame.Tools.Tests.csproj --blame-hang-timeout 5m -c Release
-          elif [ "$RUNNER_OS" == "Linux" ]; then
-                MGFXC_WINE_PATH=/home/runner/.winemonogame dotnet test Tools/MonoGame.Tools.Tests/MonoGame.Tools.Tests.csproj --blame-hang-timeout 5m -c Release --filter="TestCategory!=Audio"
           else
-                MGFXC_WINE_PATH=/Users/runner/.winemonogame dotnet test Tools/MonoGame.Tools.Tests/MonoGame.Tools.Tests.csproj --blame-hang-timeout 5m -c Release --filter="TestCategory!=Audio"
+                MGFXC_WINE_PATH="$HOME/.winemonogame" dotnet test Tools/MonoGame.Tools.Tests/MonoGame.Tools.Tests.csproj --blame-hang-timeout 5m -c Release --filter="TestCategory!=Audio"
           fi
         env:
           CI: true
@@ -249,7 +242,10 @@ jobs:
   pack-native-runtime:
     name: PackNativeRuntime
     needs: [ build ]
-    runs-on: ubuntu-latest
+    # Packs the runtime NuGets from the native binaries of *all* build legs, including the Windows ones. Under
+    # TRACE_CI_RUNNERS=self-hosted the Windows leg does not exist, so packaging is skipped; hosted CI still packs.
+    if: vars.TRACE_CI_RUNNERS != 'self-hosted'
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]') || 'ubuntu-latest' }}
     permissions:
         packages: write
         contents: write
@@ -281,7 +277,8 @@ jobs:
   package-binaries:
     name: PackageBinaries
     needs: [ build, pack-native-runtime, tests ]
-    runs-on: ubuntu-latest
+    if: vars.TRACE_CI_RUNNERS != 'self-hosted'
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]') || 'ubuntu-latest' }}
     permissions:
         packages: write
         contents: write
@@ -312,8 +309,10 @@ jobs:
   deploy:
     name: Deploy
     needs: [ build, pack-native-runtime, tests ]
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' }}
+    # `needs` already holds the release path back when pack-native-runtime is skipped; the explicit condition keeps the
+    # intent readable (the fork never publishes from the local fleet).
+    if: ${{ github.event_name == 'push' && vars.TRACE_CI_RUNNERS != 'self-hosted' }}
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]') || 'ubuntu-latest' }}
     permissions:
         packages: write
         contents: write
@@ -355,7 +354,7 @@ jobs:
             token: ${{ secrets.GITHUB_TOKEN }}
 
   choose-runner:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && fromJSON('["self-hosted","Linux","X64"]') || 'ubuntu-latest' }}
     outputs:
       runner: ${{ steps.runner.outputs.runner }}
 
@@ -369,30 +368,21 @@ jobs:
         fi
 
   tests:
-    name: tests-${{ matrix.os }}
-    needs: [ build, pack-native-runtime, choose-runner ]
-    runs-on: ${{ matrix.os }}
+    name: tests-${{ matrix.platform }}
+    # pack-native-runtime is not a dependency: the tests only consume the test artifacts the build leg uploads.
+    # Keeping it in `needs` would skip the tests under TRACE_CI_RUNNERS=self-hosted, where packaging is skipped.
+    needs: [ build, choose-runner ]
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && (matrix.platform == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]')) || (matrix.platform == 'windows' && format('windows{0}latest', needs.choose-runner.outputs.runner) || matrix.platform == 'macos' && format('macos{0}latest', needs.choose-runner.outputs.runner) || matrix.platform == 'linux-arm' && 'ubuntu-24.04-arm' || 'ubuntu-latest') }}
+    env:
+      # The Framework pass skips Audio on Linux because the audio suite runs in its own step there.
+      MATRIX_FILTER: ${{ matrix.platform == 'linux' && '--where="Category != Audio"' || '' }}
     strategy:
       matrix:
-        include:
-          - os: windows${{ needs.choose-runner.outputs.runner }}latest
-            platform: windows
-            shell: pwsh
-          - os: macos${{ needs.choose-runner.outputs.runner }}latest
-            platform: macos
-            shell: bash
-          - os: ubuntu-latest
-            platform: linux
-            shell: bash
-            filter: --where="Category != Audio"
-          - os: ubuntu-24.04-arm
-            platform: linux
-            shell: bash
-            filter: --where="Category != Audio"
+        platform: ${{ fromJSON(vars.TRACE_CI_RUNNERS == 'self-hosted' && '["macos","linux"]' || '["windows","macos","linux","linux-arm"]') }}
       fail-fast: false
     defaults:
       run:
-        shell: ${{ matrix.shell }}
+        shell: ${{ matrix.platform == 'windows' && 'pwsh' || 'bash' }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v7
@@ -418,6 +408,29 @@ jobs:
         with:
           dotnet-version: '${{ env.DotnetVersion }}'
           global-json-file: "./global.json"
+
+      - name: Install Linux test dependencies
+        # The local runner image is a plain .NET container: it has none of the SDL/X11/GL/Vulkan runtime libraries or
+        # the virtual display the DesktopGL and Vulkan artifacts need. The hosted image already ships them.
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libgl1-mesa-dri libglx-mesa0 libegl1 libgles2 \
+            mesa-vulkan-drivers libvulkan1 \
+            xvfb xauth \
+            libasound2t64 libpulse0 libdbus-1-3 libudev1 \
+            libx11-6 libxext6 libxrandr2 libxcursor1 libxfixes3 libxi6 libxss1 libxtst6 \
+            libwayland-client0 libxkbcommon0 libdrm2 libgbm1
+
+      - name: Start the virtual display
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
+        run: |
+          Xvfb :99 -screen 0 1280x720x24 >/dev/null 2>&1 &
+          echo "DISPLAY=:99" >> "$GITHUB_ENV"
+          # No GPU in the container: DesktopGL draws through Mesa llvmpipe and Vulkan through lavapipe.
+          echo "LIBGL_ALWAYS_SOFTWARE=1" >> "$GITHUB_ENV"
+          echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
 
       - name: Install Linux Native smoke dependencies
         if: runner.environment == 'github-hosted' && matrix.platform == 'linux' && runner.arch == 'X64'
@@ -449,7 +462,6 @@ jobs:
         uses: monogame/monogame-actions/install-wine@v1.0.3
 
       - name: Install Fonts
-        if: runner.environment == 'github-hosted'
         uses: monogame/monogame-actions/install-fonts@v1
 
       - name: Pin xcode version
@@ -602,7 +614,7 @@ jobs:
       # We have to run this is bits because the tests crash if too many are run in one go?
       - name: Run Framework Tests
         if: runner.environment != 'github-hosted' || runner.os != 'Windows' 
-        run: dotnet MonoGame.Tests.dll --timeout=300000 --test MonoGame.Tests.Framework ${{matrix.filter}}
+        run: dotnet MonoGame.Tests.dll --timeout=300000 --test MonoGame.Tests.Framework ${{ env.MATRIX_FILTER }}
         env:
           CI: true
         working-directory: tests-desktopgl
