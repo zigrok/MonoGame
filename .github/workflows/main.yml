@@ -123,6 +123,14 @@ jobs:
         with:
           xcode-version: '${{ env.XCodeVersion }}'
 
+      - name: Accept the Xcode installed on the host
+        # The 10.0.103 macOS workload recommends Xcode 26.2; the runner Mac has 27.1 and only that. The check compares
+        # major.minor, and MGCB Editor still bundles with the newer Xcode, so tell MSBuild the mismatch is intentional
+        # (ValidateXcodeVersion is the documented switch on the _ValidateXcodeVersion target). The pin above stays for
+        # the hosted legs, where 26.2 is available.
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'macOS'
+        run: echo "ValidateXcodeVersion=false" >> "$GITHUB_ENV"
+
       - name: Add msbuild to PATH
         if: runner.os == 'Windows'
         uses: microsoft/setup-msbuild@v3
@@ -181,10 +189,33 @@ jobs:
         run: echo "::remove-matcher owner=csc::"
 
       - name: Setup Wine
-        # The macOS action runs `brew upgrade` and installs an x86_64 Wine; the runner Mac already has Wine (with the
-        # Rosetta 2 requirement) and the MGFXC prefix. Linux still uses the action: the container starts without Wine.
-        if: vars.TRACE_CI_RUNNERS != 'self-hosted' || runner.os != 'macOS'
+        # Under the flag both self-hosted legs install Wine themselves below: the macOS action runs `brew upgrade` and
+        # needs sudo, the Linux one runs `apt install` without -y, which aborts on a non-interactive runner.
+        if: vars.TRACE_CI_RUNNERS != 'self-hosted'
         uses: monogame/monogame-actions/install-wine@v1.0.3
+
+      - name: Install Wine on the self-hosted Linux runner
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
+        run: |
+          # Same WineHQ build the upstream action installs, but non-interactive and without the ~2.2 GB of recommends
+          # (fonts, gstreamer, systemd) that a headless compiler does not need.
+          sudo dpkg --add-architecture i386
+          sudo mkdir -pm755 /etc/apt/keyrings
+          sudo wget -q -O /etc/apt/keyrings/winehq-archive.key https://dl.winehq.org/wine-builds/winehq.key
+          sudo wget -q -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends winehq-stable p7zip-full curl
+          command -v wine64
+          wget -qO- https://monogame.net/downloads/net9_mgfxc_wine_setup.sh | bash
+          echo "$HOME/.winemonogame" >> "$GITHUB_PATH"
+          {
+            echo "WINEPREFIX=$HOME/.winemonogame"
+            echo "WINEARCH=win64"
+            echo "WINEDEBUG=-all"
+            echo "MVK_CONFIG_LOG_LEVEL=0"
+            echo "WINEDLLOVERRIDES=d3dcompiler_47=n,explorer.exe=e,services.exe=f"
+            echo "MGFXC_WINE_PATH=$HOME/.winemonogame"
+          } >> "$GITHUB_ENV"
 
       - name: Use the Wine installed on the host
         if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'macOS'
@@ -458,11 +489,11 @@ jobs:
             libgl1 libgl1-mesa-dri libglx-mesa0 libegl1 libgles2 \
             mesa-vulkan-drivers libvulkan1 \
             xvfb xauth \
-            libasound2t64 libpulse0 libdbus-1-3 libudev1 \
+            libasound2t64 libpulse0 libdbus-1-3 libudev1 pulseaudio \
             libx11-6 libxext6 libxrandr2 libxcursor1 libxfixes3 libxi6 libxss1 libxtst6 \
             libwayland-client0 libxkbcommon0 libdrm2 libgbm1
 
-      - name: Start the virtual display
+      - name: Start the virtual display and the null audio sink
         if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
         run: |
           Xvfb :99 -screen 0 1280x720x24 >/dev/null 2>&1 &
@@ -470,6 +501,16 @@ jobs:
           # No GPU in the container: DesktopGL draws through Mesa llvmpipe and Vulkan through lavapipe.
           echo "LIBGL_ALWAYS_SOFTWARE=1" >> "$GITHUB_ENV"
           echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+          # No sound card either: a PulseAudio null sink gives SDL a real audio backend, so the Audio/Song suites run
+          # instead of failing to open a device (they are not skipped).
+          export XDG_RUNTIME_DIR="$HOME/.pulse-runtime"
+          mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+          pulseaudio --daemonize=yes --exit-idle-time=-1 --log-target=file:/tmp/pulseaudio.log
+          pactl load-module module-null-sink sink_name=trace-null sink_properties=device.description=TraceNull
+          pactl set-default-sink trace-null
+          pactl info
+          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
+          echo "PULSE_SERVER=unix:$XDG_RUNTIME_DIR/pulse/native" >> "$GITHUB_ENV"
 
       - name: Install Linux Native smoke dependencies
         if: runner.environment == 'github-hosted' && matrix.platform == 'linux' && runner.arch == 'X64'
@@ -508,6 +549,12 @@ jobs:
         if: runner.environment == 'github-hosted' && runner.os == 'macos'
         with:
           xcode-version: '${{ env.XCodeVersion }}'
+
+      - name: Accept the Xcode installed on the host
+        # Same as in the build job: the template tests build the iOS app with the host's Xcode 27.1, while the 10.0.103
+        # macOS workload recommends 26.2.
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'macOS'
+        run: echo "ValidateXcodeVersion=false" >> "$GITHUB_ENV"
 
       - name: Download tests-desktopgl-${{ matrix.platform }}
         uses: actions/download-artifact@v8
