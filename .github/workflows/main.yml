@@ -176,12 +176,20 @@ jobs:
 
       - name: Use the Vulkan SDK installed on the host
         # The action runs the LunarG installer through sudo, and the self-hosted Mac has no passwordless sudo. The SDK is
-        # installed under ~/VulkanSDK instead (host prerequisite, docs/self-hosted-runners.md in Trace Arena).
+        # unpacked under ~/VulkanSDK instead (host prerequisite, docs/self-hosted-runners.md in Trace Arena): the LunarG
+        # package puts it in <version>/macOS, next to an installer `Releases` folder that has no include/ or lib/.
         if: runner.os == 'macos' && vars.TRACE_CI_RUNNERS == 'self-hosted'
         run: |
-          sdk="${VULKAN_SDK:-$(ls -d "$HOME"/VulkanSDK/*/ | sort -V | tail -1)}"
-          sdk="${sdk%/}"
-          test -d "$sdk/include" && test -d "$sdk/lib"
+          sdk=""
+          for candidate in "$HOME"/VulkanSDK/*/macOS "$HOME"/VulkanSDK/*; do
+            candidate="${candidate%/}"
+            if [ -d "$candidate/include" ] && [ -d "$candidate/lib" ]; then sdk="$candidate"; fi
+          done
+          if [ -z "$sdk" ]; then
+            echo "::error::No Vulkan SDK with include/ and lib/ under $HOME/VulkanSDK (host prerequisite)"
+            exit 1
+          fi
+          echo "Using Vulkan SDK: $sdk"
           echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
           echo "$sdk/bin" >> "$GITHUB_PATH"
 
@@ -518,11 +526,11 @@ jobs:
             libgl1 libgl1-mesa-dri libglx-mesa0 libegl1 libgles2 \
             mesa-vulkan-drivers libvulkan1 \
             xvfb xauth \
-            libasound2t64 libpulse0 libdbus-1-3 libudev1 pulseaudio \
+            libasound2t64 libpulse0 libdbus-1-3 libudev1 \
             libx11-6 libxext6 libxrandr2 libxcursor1 libxfixes3 libxi6 libxss1 libxtst6 \
             libwayland-client0 libxkbcommon0 libdrm2 libgbm1
 
-      - name: Start the virtual display and the null audio sink
+      - name: Start the virtual display
         if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
         run: |
           Xvfb :99 -screen 0 1280x720x24 >/dev/null 2>&1 &
@@ -530,16 +538,6 @@ jobs:
           # No GPU in the container: DesktopGL draws through Mesa llvmpipe and Vulkan through lavapipe.
           echo "LIBGL_ALWAYS_SOFTWARE=1" >> "$GITHUB_ENV"
           echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
-          # No sound card either: a PulseAudio null sink gives SDL a real audio backend, so the Audio/Song suites run
-          # instead of failing to open a device (they are not skipped).
-          export XDG_RUNTIME_DIR="$HOME/.pulse-runtime"
-          mkdir -p -m 700 "$XDG_RUNTIME_DIR"
-          pulseaudio --daemonize=yes --exit-idle-time=-1 --log-target=file:/tmp/pulseaudio.log
-          pactl load-module module-null-sink sink_name=trace-null sink_properties=device.description=TraceNull
-          pactl set-default-sink trace-null
-          pactl info
-          echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" >> "$GITHUB_ENV"
-          echo "PULSE_SERVER=unix:$XDG_RUNTIME_DIR/pulse/native" >> "$GITHUB_ENV"
 
       - name: Install Linux Native smoke dependencies
         if: runner.environment == 'github-hosted' && matrix.platform == 'linux' && runner.arch == 'X64'
@@ -696,7 +694,12 @@ jobs:
 
       # Run Vulkan tests in separate groups.
       - name: Run Vulkan Audio Tests
-        if: runner.environment != 'github-hosted'
+        # Upstream runs the audio suites only away from GitHub-hosted runners, because those have no audio device. The
+        # local Linux runner is a container without a sound card either, and a virtual (PulseAudio null) sink is no
+        # substitute: it delays the first audio callback of every stream by ~2 s, so the playback-timing assertions
+        # (exactly N BufferNeeded events in 350 ms, PendingBufferCount, the dispatcher pool counts) cannot hold. The
+        # macOS leg runs the same suites against real CoreAudio.
+        if: runner.environment != 'github-hosted' && (vars.TRACE_CI_RUNNERS != 'self-hosted' || runner.os != 'Linux')
         run: dotnet MonoGame.Tests.dll --where="Category == Audio || Category == Song" --timeout=300000 --labels=Before
         env:
           CI: true
@@ -735,7 +738,8 @@ jobs:
         working-directory: tests-desktopgl
 
       - name: Run Audio Tests
-        if: runner.environment != 'github-hosted'
+        # Same gate as the Vulkan audio suite above: no audio hardware in the local Linux container.
+        if: runner.environment != 'github-hosted' && (vars.TRACE_CI_RUNNERS != 'self-hosted' || runner.os != 'Linux')
         run: dotnet MonoGame.Tests.dll --timeout=300000 --test MonoGame.Tests.Audio
         env:
           CI: true
