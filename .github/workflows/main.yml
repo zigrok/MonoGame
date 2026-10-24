@@ -788,7 +788,13 @@ jobs:
         working-directory: tests-windowsdx
 
       - name: Run Game Tests
-        if: runner.environment != 'github-hosted' || runner.os == 'Linux' 
+        # These tests construct a Game (and so initialize SDL video) directly on the NUnit worker thread. SDL2's Cocoa
+        # backend registers the application and sets the main menu from that thread, which aborts the process with
+        # "API misuse: setting the main menu on a non-main thread" (NSInternalInconsistencyException, exit 134) - observed
+        # on the macOS runner in run 40124673744, step "Run Game Tests". It passed once by luck when the main thread
+        # happened to initialize video first, so this is inherent to the fixture, not to the runner. Upstream never runs
+        # these on macOS either (its gate excludes GitHub-hosted, which is their only macOS). The Linux leg runs them.
+        if: (runner.environment != 'github-hosted' || runner.os == 'Linux') && !(vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'macOS')
         run: dotnet MonoGame.Tests.dll --timeout=300000 --where="Category = GameTest"
         env:
           CI: true
