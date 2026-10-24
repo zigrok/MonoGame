@@ -140,6 +140,13 @@ jobs:
           ./Bootstrap.sh
           echo "${GITHUB_WORKSPACE}/premake-core/bin/release" >> "$GITHUB_PATH"
 
+      - name: Install Linux build prerequisites
+        # The Vulkan SDK action builds the loader from source, which needs pkg-config. The hosted image has it.
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config
+
       - name: Install Vulkan SDK
         uses: zigrok/setup-vulkan-sdk@45c0d9fd5d600244dfa293b3a8c008f5fdd8a0dd
         if: runner.os != 'macos'
@@ -149,17 +156,45 @@ jobs:
           vulkan-components: 'Vulkan-Headers, Vulkan-Loader'
 
       - name: Install Full Vulkan SDK
-        if: runner.os == 'macos'
+        if: runner.os == 'macos' && vars.TRACE_CI_RUNNERS != 'self-hosted'
         uses: zigrok/install-vulkan-sdk@52e46193a1752c2d315469bfb08c45f09d932f61
         with:
           version: 1.4.309.0
           cache: true
 
+      - name: Use the Vulkan SDK installed on the host
+        # The action runs the LunarG installer through sudo, and the self-hosted Mac has no passwordless sudo. The SDK is
+        # installed under ~/VulkanSDK instead (host prerequisite, docs/self-hosted-runners.md in Trace Arena).
+        if: runner.os == 'macos' && vars.TRACE_CI_RUNNERS == 'self-hosted'
+        run: |
+          sdk="${VULKAN_SDK:-$(ls -d "$HOME"/VulkanSDK/*/ | sort -V | tail -1)}"
+          sdk="${sdk%/}"
+          test -d "$sdk/include" && test -d "$sdk/lib"
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          echo "$sdk/bin" >> "$GITHUB_PATH"
+
       - name: Disable Annotations
         run: echo "::remove-matcher owner=csc::"
 
       - name: Setup Wine
+        # The macOS action runs `brew upgrade` and installs an x86_64 Wine; the runner Mac already has Wine (with the
+        # Rosetta 2 requirement) and the MGFXC prefix. Linux still uses the action: the container starts without Wine.
+        if: vars.TRACE_CI_RUNNERS != 'self-hosted' || runner.os != 'macOS'
         uses: monogame/monogame-actions/install-wine@v1.0.3
+
+      - name: Use the Wine installed on the host
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'macOS'
+        run: |
+          for dir in /opt/homebrew/bin /usr/local/bin; do
+            if [ -x "$dir/wine" ]; then echo "$dir" >> "$GITHUB_PATH"; fi
+          done
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          command -v wine
+          command -v winepath
+          if [ ! -f "$HOME/.winemonogame/drive_c/windows/system32/dotnet.exe" ]; then
+            wget -qO- https://monogame.net/downloads/net9_mgfxc_wine_setup.sh | bash
+          fi
+          echo "WINEPREFIX=$HOME/.winemonogame" >> "$GITHUB_ENV"
 
       - name: Install Fonts
         uses: monogame/monogame-actions/install-fonts@v1
