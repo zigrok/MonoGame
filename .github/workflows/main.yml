@@ -111,7 +111,9 @@ jobs:
           brew update
 
       - name: Setup DotNet on MacOS
-        if: runner.environment == 'github-hosted' && runner.os == 'macos'
+        # Also on the self-hosted Mac: MGCB Editor targets the `macos` workload, and the local SDK does not ship it
+        # (NETSDK1147). The SDK lives in ~/.dotnet, so after the first job the install is a fast no-op.
+        if: runner.os == 'macos'
         run: |
           dotnet workload install macos ios --version ${{ env.DotnetVersion }}
 
@@ -141,11 +143,13 @@ jobs:
           echo "${GITHUB_WORKSPACE}/premake-core/bin/release" >> "$GITHUB_PATH"
 
       - name: Install Linux build prerequisites
-        # The Vulkan SDK action builds the loader from source, which needs pkg-config. The hosted image has it.
+        # The hosted image has these; the local runner image is a plain .NET container. pkg-config is needed by the Vulkan
+        # SDK action (it builds the loader from source), wget/gnupg by the Wine action below (`sudo wget` for the WineHQ
+        # key and the mgfxc prefix script).
         if: vars.TRACE_CI_RUNNERS == 'self-hosted' && runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends pkg-config
+          sudo apt-get install -y --no-install-recommends pkg-config wget gnupg ca-certificates
 
       - name: Install Vulkan SDK
         uses: zigrok/setup-vulkan-sdk@45c0d9fd5d600244dfa293b3a8c008f5fdd8a0dd
