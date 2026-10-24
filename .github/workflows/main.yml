@@ -309,6 +309,34 @@ jobs:
         env:
           ACTIONS_RUNTIME_TOKEN: ${{ env.ACTIONS_RUNTIME_TOKEN }}
           ACTIONS_RUNTIME_URL: "${{ env.ACTIONS_RUNTIME_URL }}"
+          TRACE_CI_RUNNERS: ${{ vars.TRACE_CI_RUNNERS }}
+
+      - name: Upload tests-desktopgl-${{ matrix.platform }}
+        # The self-hosted legs use the official action instead of Cake's uploader (100 s client timeout, too short for
+        # the macOS zips on a home uplink). Only the test folders are needed: packaging and Deploy are skipped under
+        # the flag. The name and root match what the tests job downloads.
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tests-desktopgl-${{ matrix.platform }}
+          path: Artifacts/Tests/DesktopGL/Release
+          if-no-files-found: error
+
+      - name: Upload tests-desktopvk-${{ matrix.platform }}
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tests-desktopvk-${{ matrix.platform }}
+          path: Artifacts/Tests/DesktopVK/Release
+          if-no-files-found: error
+
+      - name: Upload tests-desktopmetal-${{ matrix.platform }}
+        if: vars.TRACE_CI_RUNNERS == 'self-hosted' && matrix.platform == 'macos'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tests-desktopmetal-${{ matrix.platform }}
+          path: Artifacts/Tests/DesktopMetal/Release
+          if-no-files-found: error
 
   pack-native-runtime:
     name: PackNativeRuntime
