@@ -48,7 +48,8 @@ public static class StaticLibCheck
     public static void CheckWindows(BuildContext context, string filePath)
     {
         var vswhere = new VSWhereLatest(context.FileSystem, context.Environment, context.ProcessRunner, context.Tools);
-        var devcmdPath = vswhere.Latest(new VSWhereLatestSettings()).FullPath + @"\Common7\Tools\vsdevcmd.bat";
+        // Products = "*" so a Build Tools-only machine (the fleet's Windows VM) is found: the default product filter skips it.
+        var devcmdPath = vswhere.Latest(new VSWhereLatestSettings { Products = "*" }).FullPath + @"\Common7\Tools\vsdevcmd.bat";
 
         context.StartProcess(
             devcmdPath,
