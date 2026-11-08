@@ -14,15 +14,19 @@ jobs:
   build:
     name: build-${{ matrix.platform }}
     # TRACE_CI_RUNNERS picks GitHub-hosted runners (unset) or the local fleet (`self-hosted`); see
-    # docs/self-hosted-runners.md in Trace Arena. Under the flag only the legs the local fleet can host exist:
-    # there is no Windows machine, and the arm64 Linux pool is a 1.5 GB container that cannot build the native
-    # runtime. Hosted CI keeps all four legs.
-    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && (matrix.platform == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]')) || (matrix.platform == 'windows' && 'windows-latest' || matrix.platform == 'macos' && 'macos-latest' || matrix.platform == 'linux-arm' && 'ubuntu-24.04-arm' || 'ubuntu-latest') }}
+    # docs/self-hosted-runners.md in Trace Arena. Under the flag the legs the local fleet can host exist: the Windows VM on the
+    # Linux server, the native x64 Linux server and the macOS machine. The arm64 Linux pool is a 1.5 GB container that cannot build
+    # the native runtime, so that leg stays hosted-only. Hosted CI keeps all four legs.
+    runs-on: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && (matrix.platform == 'windows' && fromJSON('["self-hosted","Windows","X64"]') || matrix.platform == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || fromJSON('["self-hosted","Linux","X64","yiazmat-linux-x64-native"]')) || (matrix.platform == 'windows' && 'windows-latest' || matrix.platform == 'macos' && 'macos-latest' || matrix.platform == 'linux-arm' && 'ubuntu-24.04-arm' || 'ubuntu-latest') }}
     env:
-      MONOGAME_WINDOWS_PLATFORM_TOOLSET: ${{ matrix.platform == 'windows' && 'v145' || '' }}
+      # The VSIX templates project needs the full Visual Studio IDE SDK, which the fleet's VM (Build Tools) does not have. The hosted
+      # legs keep building it.
+      MONOGAME_SKIP_VS_TEMPLATES: ${{ vars.TRACE_CI_RUNNERS == 'self-hosted' && matrix.platform == 'windows' && '1' || '' }}
+      # v145 ships with the newest Visual Studio; the fleet's Windows VM has VS 2022 Build Tools, whose toolset is v143.
+      MONOGAME_WINDOWS_PLATFORM_TOOLSET: ${{ matrix.platform == 'windows' && (vars.TRACE_CI_RUNNERS == 'self-hosted' && 'v143' || 'v145') || '' }}
     strategy:
       matrix:
-        platform: ${{ fromJSON(vars.TRACE_CI_RUNNERS == 'self-hosted' && '["macos","linux"]' || '["windows","macos","linux","linux-arm"]') }}
+        platform: ${{ fromJSON(vars.TRACE_CI_RUNNERS == 'self-hosted' && '["windows","macos","linux"]' || '["windows","macos","linux","linux-arm"]') }}
       fail-fast: false
     defaults:
       run:

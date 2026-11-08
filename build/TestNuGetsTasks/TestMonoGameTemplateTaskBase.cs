@@ -190,6 +190,25 @@ public abstract class TestMonoGameTemplateTaskBase : FrostingTask<BuildContext>
 
     private void InstallTemplates(BuildContext context, string templateVersion, string nugetSourcePath)
     {
+        // `dotnet new uninstall` removes the template but leaves its package in ~/.templateengine/packages, and the next
+        // `dotnet new install` of the same version fails with "File ... already exists" (templating exit code 106) instead of
+        // reinstalling. Clear the cached package so a rerun on the same machine starts from a clean template store.
+        var templateCache = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".templateengine", "packages");
+        if (Directory.Exists(templateCache))
+        {
+            foreach (var cached in Directory.GetFiles(templateCache, "MonoGame.Templates.CSharp.*.nupkg"))
+            {
+                try
+                {
+                    File.Delete(cached);
+                }
+                catch (IOException)
+                {
+                    // A package held open by another dotnet process: the install below will report it if it matters.
+                }
+            }
+        }
+
         context.Information($"Installing MonoGame templates version {templateVersion}...");
         context.StartProcess("dotnet", new ProcessSettings
         {

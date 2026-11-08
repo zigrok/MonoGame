@@ -141,7 +141,8 @@
     <PropertyGroup>
       <NativePlatformToolsetArgument Condition="'$(MONOGAME_WINDOWS_PLATFORM_TOOLSET)' != ''"> /p:PlatformToolset=$(MONOGAME_WINDOWS_PLATFORM_TOOLSET)</NativePlatformToolsetArgument>
     </PropertyGroup>
-    <Exec Command="&quot;$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe&quot; -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe" ConsoleToMSBuild="true">
+    <!-- -products * so a Build Tools-only machine (the fleet's Windows VM) is found: vswhere's default product filter skips it. -->
+    <Exec Command="&quot;$(MSBuildProgramFiles32)\Microsoft Visual Studio\Installer\vswhere.exe&quot; -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe" ConsoleToMSBuild="true">
       <Output TaskParameter="ConsoleOutput" PropertyName="MGMSBuild" />
     </Exec>
     <!-- Generate Multi-Arch Solution -->
