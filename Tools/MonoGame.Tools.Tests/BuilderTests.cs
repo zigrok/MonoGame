@@ -45,7 +45,10 @@ namespace MonoGame.Tests.ContentPipeline
             Assert.AreEqual(MakePath(Directory.GetCurrentDirectory(), "obj\\Content"), args.RootedIntermediateDirectory);
 
             args = ContentBuilderParams.Parse("build", "-s", "C:/This/Does/Not/Exist");
-            Assert.AreEqual(MakePath("C:/This/Does/Not/Exist"), args.SourceDirectory);
+            // The parser stores the directory relative to the working directory. On a different drive it cannot, and the path stays
+            // absolute (the hosted runners work on D:); on the same drive it relativizes (the fleet's VM works on C:). Assert the
+            // round trip, not the hosted image's drive layout.
+            Assert.AreEqual(MakePath(Path.GetRelativePath(Directory.GetCurrentDirectory(), "C:/This/Does/Not/Exist")), args.SourceDirectory);
 
             args = ContentBuilderParams.Parse(
                 "build",
