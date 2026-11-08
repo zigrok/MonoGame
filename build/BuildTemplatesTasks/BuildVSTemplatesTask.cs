@@ -6,7 +6,10 @@ namespace BuildScripts;
 [IsDependentOn(typeof(BuildDotNetTemplatesTask))]
 public sealed class BuildVSTemplatesTask : FrostingTask<BuildContext>
 {
-    public override bool ShouldRun(BuildContext context) => context.IsRunningOnWindows();
+    // The VSIX project needs the full Visual Studio IDE SDK (VSSDK1077: no extensions directory on a Build Tools-only machine).
+    // The workflow sets the variable for the self-hosted Windows VM, which has the Build Tools; the hosted legs keep building it.
+    public override bool ShouldRun(BuildContext context) =>
+        context.IsRunningOnWindows() && Environment.GetEnvironmentVariable("MONOGAME_SKIP_VS_TEMPLATES") != "1";
 
     public override void Run(BuildContext context)
     {
